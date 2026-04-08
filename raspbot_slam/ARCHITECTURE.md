@@ -1118,3 +1118,130 @@ rover/raspbot_slam/
 - Command goal 3m away. Robot arrives within 20 cm of target.
 - Place new obstacle on path. Robot detects and replans around it.
 - Move a piece of furniture. Robot adapts map on next visit.
+
+---
+
+## 14. PyBullet Digital Twin Simulator
+
+### Overview
+
+The simulator provides drop-in replacements for all hardware interfaces:
+
+| Real Hardware | Simulator Replacement | Notes |
+|--------------|----------------------|-------|
+| `Camera` | `SimCamera` | Renders 640×480 from rover viewpoint via PyBullet |
+| `Sensors` | `SimSensors` | Ultrasonic via ray-cast with Gaussian noise |
+| `Actuators` | `SimActuators` | Mecanum kinematics via position integration |
+| I2C / Raspbot_Lib | `SimWorld` | PyBullet physics world with rooms and furniture |
+
+The SLAM pipeline code is **identical** between hardware and simulation.
+
+### Simulator Architecture
+
+```
+SimWorld (PyBullet)
+├── Floor plan (walls, floor, furniture)
+├── Kinematic rover body
+├── Procedural textures (for ORB features)
+└── Collision detection
+    │
+    ├── SimCamera
+    │   └── p.getCameraImage() → grayscale / color / depth
+    │
+    ├── SimSensors
+    │   └── p.rayTest() → ultrasonic distance (+ noise)
+    │
+    └── SimActuators
+        └── Mecanum kinematics → p.resetBasePositionAndOrientation()
+```
+
+### Kinematic Motion Model
+
+The rover is modeled as a kinematic body (mass=0) -- position is updated
+directly each physics step rather than through forces. This avoids friction
+and gravity fighting the motion, which is the standard approach for wheeled
+robots on flat floors in PyBullet.
+
+```python
+# Per step (1/240 second):
+vx = (l1 + l2 + r1 + r2) / 4.0            # forward velocity
+vy = (-l1 + l2 + r1 - r2) / 4.0           # lateral velocity
+omega = (-l1 - l2 + r1 + r2) / (4 * 0.17) # angular velocity
+
+new_x = x + (vx * cos(yaw) - vy * sin(yaw)) * dt
+new_y = y + (vx * sin(yaw) + vy * cos(yaw)) * dt
+new_yaw = yaw + omega * dt
+```
+
+Motor speed 80 (of 255) → 0.157 m/s → validated at 0.314m in 2 seconds.
+
+### Floor Plans
+
+Each floor plan includes walls, textured surfaces, and optional furniture:
+
+- **simple_room:** 4m × 4m single room
+- **L_shaped:** 6m × 4m L-shaped with table and chairs
+- **corridor:** 6m × 1.5m narrow corridor
+- **two_rooms:** Two 3m × 3m rooms connected by 1m doorway
+
+### Procedural Textures
+
+Walls and floors get procedural textures (rectangles, circles, panel lines,
+noise) so that ORB finds 500+ features per frame. Without textures,
+flat-colored walls yield < 50 features -- insufficient for SLAM.
+
+### Validated Performance
+
+| Metric | Result |
+|--------|--------|
+| Forward displacement (2s, speed=80) | 0.314m (expected 0.31m) |
+| Strafe heading drift | 0.0 degrees |
+| ORB features per frame | 500+ |
+| Cross-frame ORB matches | 148+ |
+| Ultrasonic accuracy | ±20mm noise on ground truth |
+| Depth image range | 0.05m to 20m |
+
+### Running the Simulator
+
+```bash
+# Headless (fast, for automated testing)
+python -m raspbot_slam.simulator.run_sim --floor-plan L_shaped
+
+# With GUI (visual, for demos)
+python -m raspbot_slam.simulator.run_sim --floor-plan two_rooms --gui
+
+# With custom map name and step limit
+python -m raspbot_slam.simulator.run_sim --floor-plan corridor --map-name sim_test --max-steps 3000
+```
+
+---
+
+## 15. Test Suite
+
+155 offline tests covering all modules. No hardware required.
+
+```bash
+python -m pytest tests/ -v                    # full suite
+python -m pytest tests/test_simulator.py -v   # simulator only
+```
+
+| Test File | Count | Coverage |
+|-----------|-------|----------|
+| `test_config.py` | 10 | Parameter ranges, consistency |
+| `test_camera.py` | 7 | Calibration I/O, undistortion math |
+| `test_sensors_actuators.py` | 17 | Mock hardware interface |
+| `test_feature_extractor.py` | 14 | ORB detection, matching, RANSAC |
+| `test_state_estimator.py` | 16 | EKF predict/update, landmark lifecycle, gating |
+| `test_map_manager.py` | 20 | Occupancy grid, landmarks, frontiers, persistence |
+| `test_explorer.py` | 11 | A*, frontier clustering, path simplification |
+| `test_motion_controller.py` | 12 | PID controller, waypoint following |
+| `test_synthetic_stereo.py` | 8 | Triangulation formula, scale cross-validation |
+| `test_simulator.py` | 34 | All simulator components (world, motion, camera, sensors) |
+| **Total** | **155** | |
+
+### Test Design
+
+- **Synthetic images** generated with OpenCV (checkerboards, random shapes, noise)
+- **Mock hardware** via `bot=None` on all hardware abstraction classes
+- **Pre-built maps** via pytest fixtures (room grids, landmark databases)
+- **No disk/network dependencies** except temp files for persistence tests
