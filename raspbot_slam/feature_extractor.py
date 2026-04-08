@@ -27,7 +27,7 @@ class FeatureExtractor:
         self._orb = cv2.ORB_create(
             nfeatures=n_features or config.ORB_N_FEATURES,
             scaleFactor=scale_factor or config.ORB_SCALE_FACTOR,
-            nLevels=n_levels or config.ORB_N_LEVELS,
+            nlevels=n_levels or config.ORB_N_LEVELS,
             edgeThreshold=config.ORB_EDGE_THRESHOLD,
             patchSize=config.ORB_PATCH_SIZE,
         )
