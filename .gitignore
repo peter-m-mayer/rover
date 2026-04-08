@@ -1,0 +1,34 @@
+# Large binary files
+*.STEP
+*.step
+*.img
+*.apk
+*.zip
+*.weights
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Map data (large, generated)
+raspbot_slam/maps/*/keyframes/
+raspbot_slam/maps/*/occupancy_grid.npy
+raspbot_slam/maps/*/trajectory.npy
+
+# Calibration images (if any)
+calibration_images/
