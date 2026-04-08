@@ -112,40 +112,25 @@ class MotionController:
         desired_heading = math.atan2(dy, dx)
         heading_error = self._normalize_angle(desired_heading - ctheta)
 
-        # If heading error is large, rotate in place first
-        if abs(heading_error) > math.radians(30):
-            rotation_speed = int(self._heading_pid.update(heading_error))
-            if rotation_speed > 0:
-                self._actuators.rotate_left(min(abs(rotation_speed), 60))
+        # If heading error is significant, rotate in place first
+        if abs(heading_error) > math.radians(15):
+            rotation_speed = min(60, max(25, int(abs(heading_error) * 30)))
+            if heading_error > 0:
+                self._actuators.rotate_left(rotation_speed)
             else:
-                self._actuators.rotate_right(min(abs(rotation_speed), 60))
+                self._actuators.rotate_right(rotation_speed)
             return False
 
-        # Cross-track error: perpendicular distance from the line robot→target
-        # Positive = target is to the left
-        cross_track = distance * math.sin(heading_error)
+        # Heading is roughly correct — drive forward with slight corrections
+        forward_speed = min(self._nav_speed, max(25, int(distance * 150)))
 
-        # Heading correction
-        heading_correction = self._heading_pid.update(heading_error)
+        # Small heading correction via differential steering
+        steer = self._heading_pid.update(heading_error)
+        steer = max(-30, min(30, steer))
 
-        # Cross-track correction (lateral component)
-        lateral_correction = self._crosstrack_pid.update(cross_track)
-
-        # Combine into mecanum motion
-        # Forward speed proportional to distance (slow down near target)
-        forward_speed = min(self._nav_speed, int(distance * 200))
-        forward_speed = max(20, forward_speed)
-
-        # Convert to deflection angle
-        # angle=90 is pure forward, lateral correction shifts it
-        move_angle = 90.0 + math.degrees(math.atan2(lateral_correction, forward_speed))
-        move_angle = max(45.0, min(135.0, move_angle))
-
-        # Apply heading correction as differential rotation
-        speed = int(math.sqrt(forward_speed**2 + lateral_correction**2))
-        speed = min(speed, self._nav_speed)
-
-        self._actuators.set_deflection(speed, move_angle)
+        # Convert to deflection: 90=forward, +steer=left, -steer=right
+        move_angle = 90.0 + steer * 0.5
+        self._actuators.set_deflection(forward_speed, move_angle)
 
         return False
 

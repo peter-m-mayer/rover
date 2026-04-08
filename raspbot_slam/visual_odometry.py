@@ -66,8 +66,12 @@ class VisualOdometry:
         # Cumulative pose (4x4 homogeneous, world frame)
         self._pose = np.eye(4, dtype=np.float64)
 
-        # Scale factor (updated by synthetic stereo module)
-        self._scale = 1.0
+        # Scale factor (updated by synthetic stereo module).
+        # Default is very small -- the unit vector from recoverPose has
+        # magnitude 1.0, which is meaningless. Synthetic stereo will
+        # calibrate this to real meters. Until then, keep it tiny so
+        # the EKF doesn't diverge from uncalibrated VO.
+        self._scale = 0.001
 
         # Tracking state
         self._frames_since_keyframe = 0
@@ -128,16 +132,39 @@ class VisualOdometry:
         self._last_n_inliers = n_inliers
         self._tracking = True
 
-        # t is a unit vector (3x1) -- direction only
-        # Scale by the current scale factor
+        # --- Minimum parallax gate ---
+        # Check if enough features moved significantly. During pure forward
+        # motion, features near the focus of expansion (image center) have
+        # near-zero displacement while edge features move a lot. Use the
+        # 75th percentile to avoid the stationary center features dominating.
+        pixel_displacements = np.sqrt(np.sum((pts2 - pts1)**2, axis=1))
+        p75_displacement = float(np.percentile(pixel_displacements, 75))
+
+        if p75_displacement < 1.5:
+            # Scene looks the same -- no significant motion
+            self._prev_kp = kp
+            self._prev_desc = desc
+            self._prev_frame = frame
+            return (0.0, 0.0, 0.0)
+
+        # t is a unit vector (3x1) -- direction only.
+        # Scale by the current scale factor. The default scale (0.001) is
+        # intentionally small -- synthetic stereo will calibrate it to
+        # real-world meters. Until then, we accumulate small relative units.
         t_scaled = t.ravel() * self._scale
 
-        # Convert to 2D robot-frame motion
-        # Camera convention: Z=forward, X=right, Y=down
-        # Robot convention: dx=forward, dy=left, dtheta=CCW
-        dx = float(t_scaled[2])     # camera Z → robot forward
-        dy = float(-t_scaled[0])    # camera -X → robot left
+        # Extract yaw rotation
         dtheta = self._rotation_to_yaw(R)
+
+        # Convert to 2D robot-frame motion.
+        # OpenCV recoverPose returns t as "translation of camera 2 relative
+        # to camera 1", i.e., where did the camera move TO. When the robot
+        # moves forward, the scene moves backward in camera frame, so
+        # recoverPose returns negative Z. We negate to get robot motion.
+        # Camera convention: X=right, Y=down, Z=forward.
+        # Robot convention: dx=forward, dy=left, dtheta=CCW.
+        dx = float(-t_scaled[2])     # negate: camera -Z → robot forward
+        dy = float(t_scaled[0])      # camera X → robot right → negate for left
 
         # Update cumulative pose
         delta_T = np.eye(4, dtype=np.float64)

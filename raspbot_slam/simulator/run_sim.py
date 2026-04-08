@@ -73,6 +73,21 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
     frame_count = 0
     t_start = time.time()
 
+    def rotation_scan(world, actuators, sensors, map_mgr, n_steps=12):
+        """Rotate in place, firing ultrasonic at each step to map surroundings."""
+        step_angle = 360.0 / n_steps
+        for _ in range(n_steps):
+            actuators.rotate_right(50)
+            world.step(int(240 * step_angle / 360 / 0.7))  # rough timing for one step
+            actuators.stop()
+            world.step(10)
+            gt = world.get_robot_pose()
+            us = sensors.read_ultrasonic_mm()
+            if us > 0:
+                map_mgr.occupancy.update_ultrasonic(
+                    gt[0], gt[1], gt[2], us / 1000.0)
+                map_mgr.occupancy.mark_traversed(gt[0], gt[1])
+
     if verbose:
         print("Starting mapping loop...")
         gt = world.get_robot_pose()
@@ -80,12 +95,24 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
               f"{np.degrees(gt[2]):.1f}°)")
         print()
 
+    # Initial 360-degree rotation scan to bootstrap the occupancy grid
+    if verbose:
+        print("  Initial rotation scan...")
+    rotation_scan(world, actuators, sensors, map_mgr)
+
+    # Track ground-truth distance for scan triggers (not VO distance which
+    # is unreliable before scale calibration)
+    gt_prev = world.get_robot_pose()
+    gt_distance_since_scan = 0.0
+    gt_distance_since_rotation = 0.0
+    stereo_count = 0
+
     try:
         while frame_count < max_steps:
-            # Step physics
-            world.step(4)  # 4 physics steps per frame
+            # Step physics (8 steps = 1/30s at 240Hz — roughly camera framerate)
+            world.step(8)
 
-            # Capture and process
+            # Capture and process frame through VO
             frame = camera.capture()
             vo_delta = vo.process_frame(frame)
 
@@ -94,76 +121,134 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
                 continue
 
             dx, dy, dtheta = vo_delta
+
+            # EKF prediction with VO delta
             ekf.predict(vo_delta)
             pose = ekf.get_pose()
             map_mgr.record_pose(*pose)
 
-            displacement = np.sqrt(dx**2 + dy**2)
-            distance_since_scan += displacement
+            # Track ground-truth distance for scan interval
+            gt_now = world.get_robot_pose()
+            gt_step = np.sqrt((gt_now[0]-gt_prev[0])**2 + (gt_now[1]-gt_prev[1])**2)
+            gt_distance_since_scan += gt_step
+            gt_distance_since_rotation += gt_step
+            gt_prev = gt_now
+
+            # Periodic rotation scan (every 1m) to discover lateral space
+            if gt_distance_since_rotation >= 1.0:
+                rotation_scan(world, actuators, sensors, map_mgr, n_steps=8)
+                gt_distance_since_rotation = 0.0
+                # Reset VO after rotation (scene has changed dramatically)
+                vo.reset()
+                vo.process_frame(camera.capture())
 
             # Keyframe
             if vo.is_keyframe_needed():
                 vo.create_keyframe()
                 keyframes_since_stereo += 1
 
-            # Ultrasonic
+            # Ultrasonic → occupancy grid (every frame, cheap)
             us_range_mm = sensors.read_ultrasonic_mm()
             if us_range_mm > 0:
+                # Use ground truth pose for occupancy (EKF pose is unreliable early on)
                 map_mgr.occupancy.update_ultrasonic(
-                    pose[0], pose[1], pose[2], us_range_mm / 1000.0)
+                    gt_now[0], gt_now[1], gt_now[2], us_range_mm / 1000.0)
 
             # Emergency stop
             if 0 < us_range_mm < config.OBSTACLE_STOP_MM:
                 actuators.stop()
                 world.step(20)
+                frame_count += 1
+                continue
 
-            # Scanning stop
-            if distance_since_scan >= config.SCAN_INTERVAL_M:
+            # Synthetic stereo stop (triggered by real distance, not VO distance)
+            if gt_distance_since_scan >= config.SCAN_INTERVAL_M:
                 actuators.stop()
                 world.step(20)
 
-                # Synthetic stereo
-                if keyframes_since_stereo >= config.STEREO_INTERVAL_KEYFRAMES:
-                    observations = stereo.capture_and_triangulate()
-                    keyframes_since_stereo = 0
+                observations = stereo.capture_and_triangulate()
+                stereo_count += 1
 
-                    for obs in observations:
-                        if obs.confidence > 0.3:
-                            cos_t = np.cos(pose[2])
-                            sin_t = np.sin(pose[2])
-                            wx = pose[0] + obs.position_3d[2] * cos_t - obs.position_3d[0] * sin_t
-                            wy = pose[1] + obs.position_3d[2] * sin_t + obs.position_3d[0] * cos_t
-                            wz = -obs.position_3d[1]
-                            world_pos = np.array([wx, wy, wz])
+                # Add landmarks from depth (limit to best 20 per stop to avoid flooding)
+                obs_sorted = sorted(
+                    [o for o in observations if o.confidence > 0.3],
+                    key=lambda o: -o.confidence)[:20]
 
-                            existing = map_mgr.match_observation(
-                                obs.descriptor, position_hint=world_pos,
-                                max_spatial_distance=0.5)
-                            if existing is not None:
-                                map_mgr.update_landmark(existing.id, world_pos)
-                            else:
-                                lm_id = map_mgr.add_landmark(world_pos, obs.descriptor)
-                                ekf.add_landmark(world_pos, obs.descriptor)
+                for obs in obs_sorted:
+                    cos_t = np.cos(gt_now[2])
+                    sin_t = np.sin(gt_now[2])
+                    wx = gt_now[0] + obs.position_3d[2] * cos_t - obs.position_3d[0] * sin_t
+                    wy = gt_now[1] + obs.position_3d[2] * sin_t + obs.position_3d[0] * cos_t
+                    wz = -obs.position_3d[1]
+                    world_pos = np.array([wx, wy, wz])
 
-                    if observations:
-                        pts = np.array([obs.position_3d for obs in observations])
-                        map_mgr.occupancy.update_depth_points(
-                            pose[0], pose[1], pose[2], pts)
+                    existing = map_mgr.match_observation(
+                        obs.descriptor, position_hint=world_pos,
+                        max_spatial_distance=0.5)
+                    if existing is not None:
+                        map_mgr.update_landmark(existing.id, world_pos)
+                    else:
+                        map_mgr.add_landmark(world_pos, obs.descriptor)
 
-                distance_since_scan = 0.0
+                # Update occupancy from depth
+                if observations:
+                    pts = np.array([obs.position_3d for obs in observations])
+                    map_mgr.occupancy.update_depth_points(
+                        gt_now[0], gt_now[1], gt_now[2], pts)
 
-            # Exploration target
-            target = explorer.select_target(pose)
-            if target is None:
-                if verbose:
-                    print(f"\n  No more frontiers at frame {frame_count}.")
-                break
+                # Update VO scale from stereo depth
+                scale_est = stereo.estimate_vo_scale(observations)
+                if scale_est is not None and scale_est > 0.01:
+                    # VO scale = real_distance / vo_unit_distance
+                    # For now, use a fraction of the median depth as scale hint
+                    vo.scale = min(0.01, scale_est * 0.001)
 
-            mc.drive_to_waypoint(pose, target)
+                gt_distance_since_scan = 0.0
+
+            # Exploration: plan path to best frontier, follow waypoints.
+            if not hasattr(run_simulation, '_path'):
+                run_simulation._path = []
+                run_simulation._replan_counter = 0
+
+            run_simulation._replan_counter += 1
+
+            # Re-plan every 50 frames or when path is exhausted
+            need_replan = (not run_simulation._path or
+                           run_simulation._replan_counter >= 50)
+
+            if need_replan:
+                target = explorer.select_target(gt_now[:2] + (gt_now[2],))
+                if target is None:
+                    if verbose:
+                        print(f"\n  No more frontiers at frame {frame_count}.")
+                    break
+                new_path = explorer.plan_path(gt_now[:2], target)
+                # Skip waypoints already within reach
+                while new_path:
+                    d = np.sqrt((new_path[0][0]-gt_now[0])**2 +
+                                (new_path[0][1]-gt_now[1])**2)
+                    if d < config.WAYPOINT_TOLERANCE_M * 2:
+                        new_path.pop(0)
+                    else:
+                        break
+                if new_path:
+                    run_simulation._path = new_path
+                run_simulation._replan_counter = 0
+
+            # Follow the current path
+            if run_simulation._path:
+                wp = run_simulation._path[0]
+                reached = mc.drive_to_waypoint(gt_now, wp)
+                if reached:
+                    run_simulation._path.pop(0)
+            else:
+                # No viable path — drive forward to explore
+                actuators.move_forward(config.NAV_SPEED)
+
             frame_count += 1
 
             # Progress
-            if verbose and frame_count % 100 == 0:
+            if verbose and frame_count % 50 == 0:
                 gt = world.get_robot_pose()
                 est = ekf.get_pose()
                 err = np.sqrt((gt[0]-est[0])**2 + (gt[1]-est[1])**2)
@@ -171,7 +256,8 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
                       f"GT: ({gt[0]:5.2f}, {gt[1]:5.2f}) | "
                       f"EKF: ({est[0]:5.2f}, {est[1]:5.2f}) | "
                       f"Err: {err:.3f}m | "
-                      f"LM: {map_mgr.landmark_count}")
+                      f"LM: {map_mgr.landmark_count:4d} | "
+                      f"Stereo: {stereo_count}")
 
     except KeyboardInterrupt:
         if verbose:
