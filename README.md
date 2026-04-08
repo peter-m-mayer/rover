@@ -1,93 +1,186 @@
-# rover
+# RASPBOT-V2 Visual SLAM
 
+Indoor floor mapping and autonomous navigation for the [Yahboom RASPBOT-V2](https://www.yahboom.net/study/RASPBOT-V2) rover on Raspberry Pi 5.
 
+## What This Does
 
-## Getting started
+The rover autonomously explores your house, builds a map of the floor plan using its single camera, and then navigates to commanded locations using that map. No lidar, no encoders, no IMU -- just a camera, an ultrasonic sensor, and mecanum wheels.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Key Idea: Synthetic Stereo
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+Since the rover has mecanum wheels that can strafe laterally without rotating, it creates **synthetic stereo vision** by capturing two images with a known baseline:
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/peter-m-mayer/rover.git
-git branch -M main
-git push -uf origin main
+1. Capture LEFT image
+2. Strafe RIGHT 5 cm (known distance)
+3. Capture RIGHT image
+4. Triangulate: depth = focal_length × baseline / disparity
 ```
 
-## Integrate with your tools
+This resolves the scale ambiguity that normally plagues monocular SLAM.
 
-* [Set up project integrations](https://gitlab.com/peter-m-mayer/rover/-/settings/integrations)
+## Architecture
 
-## Collaborate with your team
+```
+Camera (640x480) → ORB Features → Visual Odometry (Essential matrix)
+                                        ↓
+Synthetic Stereo (mecanum strafe) → EKF-SLAM ← Ultrasonic
+                                        ↓
+                                   Map Manager
+                                   ├─ 3D Landmarks (ORB descriptors)
+                                   └─ 2D Occupancy Grid (5 cm cells)
+                                        ↓
+                              Explorer / Navigator
+                                        ↓
+                              PID + Mecanum Motors
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Two Operating Modes
 
-## Test and Deploy
+**Mapping** -- Autonomous exploration using frontier-based strategy. Stops every 50 cm for a pan sweep + stereo depth capture. Builds the map from scratch.
 
-Use the built-in continuous integration in GitLab.
+```bash
+python -m raspbot_slam.run_mapping --map-name ground_floor
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+**Navigation** -- Loads a stored map, relocalizes via panoramic feature matching + PnP, then navigates to a goal using A* path planning.
 
-***
+```bash
+python -m raspbot_slam.run_navigation --map-name ground_floor --goal 3.0 2.5
+```
 
-# Editing this README
+## Package Structure
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```
+raspbot_slam/
+├── config.py                 # All tunable parameters
+│
+├── camera.py                 # Capture, calibration, undistortion
+├── sensors.py                # Ultrasonic, line tracker
+├── actuators.py              # Servos, mecanum motors, LEDs
+│
+├── feature_extractor.py      # ORB detect/compute/match, RANSAC
+├── visual_odometry.py        # Frame-to-frame VO, keyframe management
+├── synthetic_stereo.py       # Strafe-based depth estimation
+├── state_estimator.py        # EKF-SLAM (bounded 30 active landmarks)
+├── map_manager.py            # Landmark DB + occupancy grid
+│
+├── explorer.py               # Frontier-based exploration + A*
+├── navigator.py              # Relocalization + goal navigation
+├── motion_controller.py      # PID waypoint following
+│
+├── calibration/
+│   ├── camera_calibrate.py   # Checkerboard intrinsic calibration
+│   └── strafe_calibrate.py   # Motor speed → distance LUT
+│
+├── offline/
+│   ├── bundle_adjustment.py  # Joint pose + landmark optimization
+│   ├── loop_closure.py       # SIFT-based distant keyframe matching
+│   └── map_optimizer.py      # Outlier removal, trajectory smoothing
+│
+├── run_mapping.py            # Entry point: autonomous mapping
+├── run_navigation.py         # Entry point: map-based navigation
+├── visualize_map.py          # matplotlib map viewer
+│
+├── maps/                     # Stored map data
+│   └── <name>/
+│       ├── metadata.json
+│       ├── landmarks.pkl
+│       ├── occupancy_grid.npy
+│       ├── trajectory.npy
+│       └── keyframes/
+│
+├── drivers/                  # Yahboom drivers (unmodified)
+└── ARCHITECTURE.md           # Full design document
+```
 
-## Suggestions for a good README
+## Hardware
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+| Component | Spec | Used For |
+|-----------|------|----------|
+| Camera | USB, 640x480 | Visual odometry, feature extraction |
+| Pan servo | 0-180° | Extend FOV during scan stops |
+| Tilt servo | 0-110° | Camera angle adjustment |
+| 4 mecanum wheels | ±255 speed, no encoders | Omnidirectional motion, lateral strafe |
+| Ultrasonic | mm resolution, forward | Obstacle detection, scale validation |
+| 14 WS2812B LEDs | RGB | Status indication |
 
-## Name
-Choose a self-explaining name for your project.
+## Computational Budget (Pi 5)
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+| Per-frame (10 FPS target) | Time |
+|---------------------------|------|
+| ORB extraction (1000 features) | 20 ms |
+| Feature matching + Essential | 17 ms |
+| EKF update (30 landmarks) | 3 ms |
+| Occupancy + control | 3 ms |
+| **Total** | **~43 ms** |
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Stereo stop: ~1 sec. Pan sweep: ~2 sec. Offline bundle adjustment: 8-17 min.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Getting Started
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### 1. Calibrate the Camera
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Print a 9x6 checkerboard and run:
+```bash
+python -m raspbot_slam.calibration.camera_calibrate
+```
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### 2. Calibrate Strafe Distance
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```bash
+python -m raspbot_slam.calibration.strafe_calibrate
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### 3. Map a Room
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+```bash
+python -m raspbot_slam.run_mapping --map-name my_house
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### 4. Visualize the Map
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```bash
+python -m raspbot_slam.visualize_map maps/my_house
+```
 
-## License
-For open source projects, say how it is licensed.
+### 5. Navigate
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```bash
+python -m raspbot_slam.run_navigation --map-name my_house --goal 3.0 2.5
+```
+
+### 6. Offline Optimization (Optional)
+
+```bash
+python -m raspbot_slam.offline.loop_closure maps/my_house
+python -m raspbot_slam.offline.bundle_adjustment maps/my_house
+python -m raspbot_slam.offline.map_optimizer maps/my_house
+```
+
+## Dependencies
+
+**On the Pi 5:**
+```
+opencv-python >= 4.5
+numpy
+scipy (for offline bundle adjustment)
+matplotlib (for visualization, optional)
+smbus (for I2C hardware control)
+```
+
+**For development (any machine):**
+All modules support mock hardware -- pass `bot=None` to hardware abstraction classes.
+
+## Key Design Decisions
+
+- **ORB over SIFT** for real-time: 10x faster, adequate for frame-to-frame tracking. SIFT used offline only for loop closure.
+- **EKF over particle filter**: Deterministic compute cost with bounded landmarks. 30 active landmarks → 94-dim state → 0.1 ms update.
+- **VO is ground truth**: With no encoders, motor commands are suggestions. Visual odometry measures what actually happened.
+- **Stop-and-scan**: Real-time VO provides direction; periodic stops provide absolute depth via synthetic stereo.
+
+## Documentation
+
+See [`ARCHITECTURE.md`](raspbot_slam/ARCHITECTURE.md) for the full design document including algorithm details, state vector definitions, calibration procedures, and verification plan.
+
+See [`ROVER_OVERVIEW.md`](ROVER_OVERVIEW.md) for an inventory of the Yahboom vendor codebase.
