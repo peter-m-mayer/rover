@@ -5,6 +5,15 @@
 *.apk
 *.zip
 *.weights
+*.mp3
+*.pdf
+
+# Yahboom vendor code (large, not ours)
+RaspbotV2-Code/
+Raspbot_V2-Manual/
+
+# Generated map data (large, reproducible)
+maps/
 
 # Python
 __pycache__/
