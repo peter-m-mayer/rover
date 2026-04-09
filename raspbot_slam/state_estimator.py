@@ -146,6 +146,119 @@ class EKFSLAM:
         P = self._P[:n, :n]
         self._P[:n, :n] = F @ P @ F.T + Q
 
+    def predict_imu(self, gyro_z: float, accel_x: float, accel_y: float, dt: float):
+        """High-rate prediction using IMU gyro and accelerometer.
+
+        When an IMU is available, this replaces predict() as the primary
+        prediction source. The gyro provides very accurate heading at 100 Hz.
+        The accelerometer provides noisy but useful position estimates
+        between VO frames.
+
+        Args:
+            gyro_z: Yaw rate in rad/s (bias-corrected).
+            accel_x: Forward acceleration in m/s^2 (gravity-compensated).
+            accel_y: Lateral acceleration in m/s^2 (gravity-compensated).
+            dt: Time interval in seconds.
+        """
+        theta = self._x[self.ITHETA]
+        dtheta = gyro_z * dt
+
+        # Position from accelerometer (double integration, first-order)
+        dx_body = 0.5 * accel_x * dt * dt
+        dy_body = 0.5 * accel_y * dt * dt
+
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        dx_world = dx_body * cos_t - dy_body * sin_t
+        dy_world = dx_body * sin_t + dy_body * cos_t
+
+        # State prediction
+        self._x[self.IX] += dx_world
+        self._x[self.IY] += dy_world
+        self._x[self.ITHETA] += dtheta
+        self._x[self.ITHETA] = self._normalize_angle(self._x[self.ITHETA])
+
+        # Process noise: gyro is very accurate, accel is noisy
+        from .imu import IMU_GYRO_NOISE_RAD, IMU_ACCEL_NOISE_M
+        n = self._dim
+        Q = np.zeros((n, n), dtype=np.float64)
+        Q[self.IX, self.IX] = (IMU_ACCEL_NOISE_M * dt * dt)**2
+        Q[self.IY, self.IY] = (IMU_ACCEL_NOISE_M * dt * dt)**2
+        Q[self.ITHETA, self.ITHETA] = (IMU_GYRO_NOISE_RAD * dt)**2
+        Q[self.ISCALE, self.ISCALE] = config.PROCESS_NOISE_SCALE**2
+
+        # Simplified Jacobian (identity for small dt)
+        P = self._P[:n, :n]
+        self._P[:n, :n] = P + Q  # F ≈ I for small dt
+
+    def update_vo(self, vo_dx: float, vo_dy: float, vo_dtheta: float):
+        """Update step using visual odometry as an OBSERVATION (not prediction).
+
+        When IMU is the prediction source, VO provides an independent
+        position observation that corrects accelerometer drift.
+
+        Args:
+            vo_dx, vo_dy, vo_dtheta: VO-estimated motion in robot frame.
+        """
+        # The VO observation is the displacement since the last VO update.
+        # We compare it against the EKF's predicted displacement (from IMU).
+        # For simplicity, treat VO heading as a direct observation of dtheta,
+        # and VO position as a relative displacement observation.
+        #
+        # Innovation: z = vo_observed - ekf_predicted_since_last_vo
+        # This requires tracking the EKF pose at the last VO update.
+        # For now, use the simpler approach: treat VO as a heading observation.
+
+        theta_est = self._x[self.ITHETA]
+        theta_vo = theta_est + vo_dtheta  # VO suggests this heading
+
+        # Heading observation from VO (less accurate than mag, but still useful)
+        z = np.array([self._normalize_angle(vo_dtheta)])
+        H = np.zeros((1, self._dim), dtype=np.float64)
+        H[0, self.ITHETA] = 1.0  # dtheta observation
+
+        R = np.array([[config.PROCESS_NOISE_HEADING**2 * 10]])  # VO heading is noisy
+
+        n = self._dim
+        P = self._P[:n, :n]
+        S = H @ P @ H.T + R
+        K = P @ H.T / S[0, 0]
+
+        self._x[:n] += (K * z[0]).ravel()
+        self._x[self.ITHETA] = self._normalize_angle(self._x[self.ITHETA])
+        self._P[:n, :n] = (np.eye(n) - K @ H) @ P
+
+    def update_heading(self, mag_heading: float, noise_rad: float = None):
+        """Update EKF with absolute heading from magnetometer.
+
+        This is the most powerful single observation: it prevents heading
+        drift indefinitely. Called every few seconds.
+
+        Args:
+            mag_heading: Absolute heading in radians (CCW from magnetic north).
+            noise_rad: Observation noise in radians.
+        """
+        from .imu import IMU_MAG_NOISE_RAD
+        noise = noise_rad or IMU_MAG_NOISE_RAD
+
+        # Innovation
+        z = np.array([self._normalize_angle(mag_heading - self._x[self.ITHETA])])
+
+        # Observation Jacobian
+        H = np.zeros((1, self._dim), dtype=np.float64)
+        H[0, self.ITHETA] = 1.0
+
+        R = np.array([[noise**2]])
+
+        n = self._dim
+        P = self._P[:n, :n]
+        S = H @ P @ H.T + R
+        K = P @ H.T / S[0, 0]
+
+        self._x[:n] += (K * z[0]).ravel()
+        self._x[self.ITHETA] = self._normalize_angle(self._x[self.ITHETA])
+        self._P[:n, :n] = (np.eye(n) - K @ H) @ P
+
     # =========================================================================
     # Landmark Update
     # =========================================================================

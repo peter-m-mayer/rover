@@ -122,6 +122,20 @@ LED_COLOR_LOST = "red"              # red when tracking lost
 LED_COLOR_SCANNING = "yellow"       # yellow during scan stop
 
 # =============================================================================
+# IMU (ICM-20948, optional upgrade)
+# =============================================================================
+IMU_ENABLED = True                     # auto-detect; set False to force disable
+IMU_I2C_ADDRESS = 0x69                 # default ICM-20948 address (no conflict with 0x2B)
+IMU_GYRO_RATE_HZ = 100                # gyro sampling rate
+IMU_ACCEL_RATE_HZ = 50                # accelerometer sampling rate
+IMU_MAG_RATE_HZ = 10                  # magnetometer sampling rate
+IMU_GYRO_NOISE_RAD = 0.001            # gyro noise std (rad/s)
+IMU_ACCEL_NOISE_M = 0.05              # accelerometer noise std (m/s^2)
+IMU_MAG_NOISE_RAD = 0.05              # magnetometer heading noise (rad)
+IMU_COMPLEMENTARY_ALPHA = 0.98        # gyro weight in complementary filter
+IMU_MAG_DECLINATION_DEG = 0.0         # local magnetic declination
+
+# =============================================================================
 # File Paths
 # =============================================================================
 CALIBRATION_DIR = "calibration"

@@ -24,3 +24,4 @@ from .sim_world import SimWorld
 from .sim_camera import SimCamera
 from .sim_sensors import SimSensors
 from .sim_actuators import SimActuators
+from .sim_imu import SimIMU
