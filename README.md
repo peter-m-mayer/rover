@@ -25,15 +25,18 @@ This resolves the scale ambiguity that normally plagues monocular SLAM.
 Camera (640x480) → ORB Features → Visual Odometry (Essential matrix)
                                         ↓
 Synthetic Stereo (mecanum strafe) → EKF-SLAM ← Ultrasonic
-                                        ↓
-                                   Map Manager
-                                   ├─ 3D Landmarks (ORB descriptors)
-                                   └─ 2D Occupancy Grid (5 cm cells)
-                                        ↓
+                                     ↑  ↓
+              IMU (optional, 100Hz) ──┘  ↓
+              gyro + accel + mag    Map Manager
+                                    ├─ 3D Landmarks (ORB descriptors)
+                                    └─ 2D Occupancy Grid (5 cm cells)
+                                         ↓
                               Explorer / Navigator
-                                        ↓
+                                         ↓
                               PID + Mecanum Motors
 ```
+
+**With IMU (optional upgrade):** The gyro becomes the primary prediction source at 100 Hz, VO becomes an observation that corrects drift, and the magnetometer provides absolute heading that prevents heading drift indefinitely.
 
 ## Three Ways to Run
 
@@ -74,13 +77,14 @@ rover/
 ├── ROVER_OVERVIEW.md                 # Yahboom vendor codebase inventory
 ├── .gitignore
 │
-├── raspbot_slam/                     # Main package (7,829 lines across 42 files)
-│   ├── ARCHITECTURE.md               # Full design document (1,120 lines)
+├── raspbot_slam/                     # Main package (9,296 lines across 46 files)
+│   ├── ARCHITECTURE.md               # Full design document (1,247 lines)
 │   ├── config.py                     # All tunable parameters in one place
 │   │
 │   ├── camera.py                     # Capture, calibration, undistortion
 │   ├── sensors.py                    # Ultrasonic, line tracker
 │   ├── actuators.py                  # Servos, mecanum motors, LEDs
+│   ├── imu.py                        # ICM-20948 9-DOF IMU (optional upgrade)
 │   │
 │   ├── feature_extractor.py          # ORB detect/compute/match + RANSAC
 │   ├── visual_odometry.py            # Frame-to-frame VO, keyframe management
@@ -97,6 +101,7 @@ rover/
 │   │   ├── sim_camera.py             # Rendered camera with pan/tilt + depth
 │   │   ├── sim_sensors.py            # Ultrasonic via ray-cast
 │   │   ├── sim_actuators.py          # Motor commands → kinematic motion
+│   │   ├── sim_imu.py                # Simulated IMU from GT pose + noise
 │   │   └── run_sim.py                # Entry point for simulated SLAM
 │   │
 │   ├── calibration/                  # One-time setup tools
@@ -149,6 +154,23 @@ rover/
 | Ultrasonic | mm resolution, forward-facing | Obstacle detection, scale validation |
 | 14 WS2812B LEDs | RGB addressable | Status indication |
 | Buzzer | on/off | Audio feedback |
+| **ICM-20948 IMU** | **9-DOF, I2C @ 0x69** | **Optional: 100 Hz heading, dead reckoning, compass** |
+
+### IMU Upgrade (Optional)
+
+The [Adafruit ICM-20948](https://www.adafruit.com/product/4554) adds 9 degrees of freedom:
+
+| Sensor | Rate | What it provides |
+|--------|------|-----------------|
+| 3-axis Gyroscope | 100 Hz | Heading at 10x camera framerate. Eliminates heading drift. |
+| 3-axis Accelerometer | 50 Hz | Dead reckoning between VO frames. Fills motion gaps. |
+| 3-axis Magnetometer | 10 Hz | Absolute compass heading. No drift ever. |
+
+**Wiring:** 4 wires to Pi GPIO (3.3V, GND, SCL, SDA). I2C address 0x69 -- no conflict with rover at 0x2B.
+
+**Install:** `sudo pip3 install adafruit-circuitpython-icm20x`
+
+**Impact on SLAM:** Without IMU, VO is the only motion source (10 FPS, heading drifts during rotation scans). With IMU, the gyro becomes the primary EKF prediction at 100 Hz, VO becomes a corrective observation, and the magnetometer prevents heading drift indefinitely. Tested result: heading variance drops 100x.
 
 ## Simulator (Digital Twin)
 
@@ -218,14 +240,17 @@ from raspbot_slam.simulator import SimActuators as Actuators
 All tests run offline without hardware:
 
 ```bash
-# Run full suite (155 tests, ~3 seconds)
+# Run full suite (172+ tests, ~18 seconds)
 python -m pytest tests/ -v
 
-# Run just SLAM module tests (121 tests)
-python -m pytest tests/ -v --ignore=tests/test_simulator.py
+# Run just SLAM module tests (exclude simulator)
+python -m pytest tests/ -v --ignore=tests/test_simulator.py --ignore=tests/test_integration.py
 
 # Run just simulator tests (34 tests)
 python -m pytest tests/test_simulator.py -v
+
+# Run IMU integration tests (6 tests)
+python -m pytest tests/test_imu.py::TestEKFWithIMU -v
 
 # Run a single test file
 python -m pytest tests/test_state_estimator.py -v
@@ -240,12 +265,15 @@ python -m pytest tests/test_state_estimator.py -v
 | Hardware mock | 17 | Sensors + actuators with `bot=None` |
 | ORB features | 14 | Detection, matching, RANSAC, utilities |
 | EKF-SLAM | 16 | Predict, update, gating, landmark lifecycle |
+| EKF + IMU | 6 | IMU prediction, mag heading, VO-as-observation |
 | Map | 20 | Occupancy grid, landmarks, persistence |
 | Explorer | 11 | A*, frontiers, path simplification |
 | Motion control | 12 | PID, waypoint following, angle normalization |
 | Stereo depth | 8 | Triangulation formula, scale cross-validation |
 | Simulator | 34 | World/motion/camera/sensors/actuator interface |
-| **Total** | **155** | |
+| Integration | 11 | End-to-end VO, stereo, EKF, navigation in sim |
+| IMU mock | 6 | Mock mode, calibration, data injection |
+| **Total** | **172+** | |
 
 ## Getting Started
 
@@ -255,9 +283,10 @@ python -m pytest tests/test_state_estimator.py -v
 pip install opencv-python-headless numpy scipy matplotlib pybullet
 ```
 
-On the Pi 5, also install the I2C driver:
+On the Pi 5, also install hardware drivers:
 ```bash
 pip install smbus2
+pip install adafruit-circuitpython-icm20x   # optional, for IMU
 cd "RaspbotV2-Code/Python driver library/py_install"
 sudo python3 setup.py install
 ```
@@ -330,6 +359,7 @@ python -m raspbot_slam.offline.map_optimizer maps/my_house
 | **Stop-and-scan for depth** | Continuous VO gives direction; periodic synthetic stereo gives absolute scale. |
 | **Kinematic simulation** | Direct position integration (not force-based) for reliable, predictable digital twin. |
 | **Dual map representation** | Sparse landmarks for localization, occupancy grid for navigation. |
+| **IMU as optional upgrade** | System works without it (proven in sim). With it, gyro replaces VO as prediction source, mag prevents heading drift. |
 
 ## Documentation
 
@@ -342,4 +372,4 @@ python -m raspbot_slam.offline.map_optimizer maps/my_house
 
 - **GitLab:** https://gitlab.com/peter-m-mayer/rover
 - **Platform:** [Yahboom RASPBOT-V2](https://www.yahboom.net/study/RASPBOT-V2)
-- **Stats:** 42 Python files, 7,829 lines of code, 155 tests
+- **Stats:** 46 Python files, 9,296 lines of code, 172+ tests

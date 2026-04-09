@@ -1237,7 +1237,10 @@ python -m pytest tests/test_simulator.py -v   # simulator only
 | `test_motion_controller.py` | 12 | PID controller, waypoint following |
 | `test_synthetic_stereo.py` | 8 | Triangulation formula, scale cross-validation |
 | `test_simulator.py` | 34 | All simulator components (world, motion, camera, sensors) |
-| **Total** | **155** | |
+| `test_integration.py` | 11 | End-to-end VO, stereo, EKF, navigation in sim |
+| `test_imu.py` (EKF) | 6 | IMU prediction, mag heading, VO-as-observation |
+| `test_imu.py` (mock) | 6 | Mock mode, calibration, data injection |
+| **Total** | **172+** | |
 
 ### Test Design
 
@@ -1245,3 +1248,109 @@ python -m pytest tests/test_simulator.py -v   # simulator only
 - **Mock hardware** via `bot=None` on all hardware abstraction classes
 - **Pre-built maps** via pytest fixtures (room grids, landmark databases)
 - **No disk/network dependencies** except temp files for persistence tests
+
+---
+
+## 16. ICM-20948 9-DOF IMU (Optional Upgrade)
+
+### Overview
+
+The [Adafruit ICM-20948](https://www.adafruit.com/product/4554) adds 9 axes of
+inertial measurement to the rover. This is an **optional upgrade** -- the SLAM system
+works without it (proven in simulation), but gains significantly when it is present.
+
+### Hardware
+
+| Sensor | Spec | Rate | SLAM Use |
+|--------|------|------|----------|
+| 3-axis Gyroscope | ±250 to ±2000 dps | 100 Hz | Primary heading source (replaces VO) |
+| 3-axis Accelerometer | ±2g to ±16g | 50 Hz | Dead reckoning between VO frames |
+| 3-axis Magnetometer | ±4900 uT | 10 Hz | Absolute compass heading (no drift) |
+
+**I2C address:** 0x69 (no conflict with rover at 0x2B)
+**Wiring:** Pi 3.3V → VIN, Pi GND → GND, Pi SCL → SCL, Pi SDA → SDA
+**Library:** `pip install adafruit-circuitpython-icm20x`
+
+### Architecture Change
+
+```
+Without IMU:                          With IMU:
+VO (10 Hz) ──predict──▶ EKF          IMU (100 Hz) ──predict──▶ EKF
+                                      VO (10 Hz) ──update──▶ EKF (observation)
+                                      Mag (10 Hz) ──update──▶ EKF (heading)
+```
+
+With IMU, the gyro becomes the **primary prediction source** at 100 Hz. This is a
+fundamental architectural upgrade:
+
+- VO changes from prediction to observation (less trusted, corrective)
+- Heading comes from gyro (very accurate short-term) + magnetometer (no drift long-term)
+- Accelerometer fills motion gaps between VO frames
+
+### Module: `imu.py`
+
+```python
+class IMU:
+    def __init__(self, mock_mode=False):     # auto-detect hardware
+    def calibrate_gyro(n_samples=200):       # hold still 2 seconds
+    def calibrate_magnetometer(duration=15): # rotate slowly for 15 seconds
+    def update(self):                        # read sensors, run complementary filter
+    def start_background(rate_hz=100):       # threaded reader
+
+    # Properties (thread-safe)
+    heading: float      # fused heading (gyro + mag complementary filter)
+    gyro_z: float       # yaw rate (rad/s, bias-corrected)
+    accel_xy: (float, float)  # horizontal accel (gravity-compensated)
+    mag_heading: float  # raw magnetometer heading
+
+    # EKF helpers
+    def get_prediction_delta(dt) -> (dx, dy, dtheta)
+    def get_heading_observation() -> (heading, noise)
+```
+
+### EKF Methods (added to `state_estimator.py`)
+
+| Method | Rate | Purpose |
+|--------|------|---------|
+| `predict_imu(gyro_z, accel_x, accel_y, dt)` | 100 Hz | High-rate heading + position prediction |
+| `update_vo(vo_dx, vo_dy, vo_dtheta)` | 10 Hz | VO as corrective observation |
+| `update_heading(mag_heading, noise)` | ~1 Hz | Absolute heading from magnetometer |
+
+### Noise Parameters
+
+| Source | Noise | Compare to VO |
+|--------|-------|---------------|
+| Gyro heading | 0.001 rad/s | 100x better than VO heading |
+| Accelerometer | 0.05 m/s² | Noisy, but fills gaps |
+| Magnetometer | 0.05 rad | Absolute (no drift) |
+| VO heading | ~0.1 rad | Relative, drifts |
+
+### Complementary Filter
+
+Fuses gyro (fast, accurate short-term, drifts) with magnetometer (slow, noisy,
+no drift) using weighted blending:
+
+```
+heading = 0.98 * (heading + gyro_z * dt) + 0.02 * mag_heading
+```
+
+The 98/2 split means the gyro dominates for fast motion tracking while the
+magnetometer slowly corrects drift over seconds.
+
+### Calibration
+
+**Gyro bias** (2 seconds, robot stationary):
+- Averages 200 readings to find the zero-rate offset
+- Subtracted from all subsequent readings
+
+**Magnetometer hard/soft iron** (15 seconds, rotate robot):
+- Collects min/max per axis during rotation
+- Hard-iron offset = center of min/max range
+- Soft-iron scale = normalize each axis range
+
+### Simulation
+
+`SimIMU` generates realistic sensor data from PyBullet ground truth:
+- Gyro: angular velocity from GT + configurable bias + Gaussian noise
+- Accel: gravity + body acceleration from velocity differentiation + noise
+- Mag: Earth's field rotated by GT heading + noise
