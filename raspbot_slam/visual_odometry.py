@@ -269,7 +269,7 @@ class VisualOdometry:
     @scale.setter
     def scale(self, value: float):
         """Set scale factor (called by SyntheticStereo after calibration)."""
-        self._scale = max(0.01, value)
+        self._scale = max(1e-6, value)
 
     def get_keyframe_buffer(self) -> List[Keyframe]:
         """Return current keyframe buffer (most recent KEYFRAME_BUFFER_SIZE)."""

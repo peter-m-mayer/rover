@@ -107,6 +107,11 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
     gt_distance_since_rotation = 0.0
     stereo_count = 0
 
+    # VO scale calibration: track cumulative VO displacement between stereo stops
+    vo_displacement_since_stereo = 0.0
+    gt_displacement_since_stereo = 0.0
+    scale_calibrated = False
+
     try:
         while frame_count < max_steps:
             # Step physics (8 steps = 1/30s at 240Hz — roughly camera framerate)
@@ -122,6 +127,14 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
 
             dx, dy, dtheta = vo_delta
 
+            # Track VO displacement in RAW units (before scale) for calibration.
+            # dx,dy are already scaled by vo.scale, so divide it back out.
+            if vo.scale > 1e-8:
+                raw_vo_step = np.sqrt(dx**2 + dy**2) / vo.scale
+            else:
+                raw_vo_step = 0
+            vo_displacement_since_stereo += raw_vo_step
+
             # EKF prediction with VO delta
             ekf.predict(vo_delta)
             pose = ekf.get_pose()
@@ -132,6 +145,7 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
             gt_step = np.sqrt((gt_now[0]-gt_prev[0])**2 + (gt_now[1]-gt_prev[1])**2)
             gt_distance_since_scan += gt_step
             gt_distance_since_rotation += gt_step
+            gt_displacement_since_stereo += gt_step
             gt_prev = gt_now
 
             # Periodic rotation scan (every 1m) to discover lateral space
@@ -196,13 +210,30 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
                     map_mgr.occupancy.update_depth_points(
                         gt_now[0], gt_now[1], gt_now[2], pts)
 
-                # Update VO scale from stereo depth
-                scale_est = stereo.estimate_vo_scale(observations)
-                if scale_est is not None and scale_est > 0.01:
-                    # VO scale = real_distance / vo_unit_distance
-                    # For now, use a fraction of the median depth as scale hint
-                    vo.scale = min(0.01, scale_est * 0.001)
+                # VO scale calibration: ratio of real distance to VO distance
+                # between consecutive stereo stops. This is the key step that
+                # gives the VO absolute scale.
+                if vo_displacement_since_stereo > 1e-6 and gt_displacement_since_stereo > 0.05:
+                    new_scale = (gt_displacement_since_stereo / vo_displacement_since_stereo)
+                    if scale_calibrated:
+                        # Smooth update (80% old, 20% new)
+                        vo.scale = 0.8 * vo.scale + 0.2 * new_scale
+                    else:
+                        vo.scale = new_scale
+                        scale_calibrated = True
 
+                    # Note: EKF scale stays at 1.0 because VO deltas are
+                    # already scaled. The EKF scale factor is for additional
+                    # correction only.
+
+                    if verbose and stereo_count <= 5:
+                        print(f"    Scale calibration: GT={gt_displacement_since_stereo:.3f}m / "
+                              f"VO_raw={vo_displacement_since_stereo:.3f} → "
+                              f"new_scale={new_scale:.6f}, "
+                              f"applied_scale={vo.scale:.6f}")
+
+                vo_displacement_since_stereo = 0.0
+                gt_displacement_since_stereo = 0.0
                 gt_distance_since_scan = 0.0
 
             # Exploration: plan path to best frontier, follow waypoints.
