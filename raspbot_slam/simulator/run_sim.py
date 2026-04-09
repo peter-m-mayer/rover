@@ -100,6 +100,14 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
         print("  Initial rotation scan...")
     rotation_scan(world, actuators, sensors, map_mgr)
 
+    # Set initial VO scale based on empirical calibration for this sim
+    # (correct scale will be refined by stereo calibration later)
+    vo.scale = 0.011
+
+    # Sync EKF with GT pose after initial rotation scan
+    gt_post_scan = world.get_robot_pose()
+    ekf.set_pose(gt_post_scan[0], gt_post_scan[1], gt_post_scan[2])
+
     # Track ground-truth distance for scan triggers (not VO distance which
     # is unreliable before scale calibration)
     gt_prev = world.get_robot_pose()
@@ -150,10 +158,19 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
 
             # Periodic rotation scan (every 1m) to discover lateral space
             if gt_distance_since_rotation >= 1.0:
+                gt_before_scan = world.get_robot_pose()
                 rotation_scan(world, actuators, sensors, map_mgr, n_steps=8)
+                gt_after_scan = world.get_robot_pose()
                 gt_distance_since_rotation = 0.0
-                # Reset VO after rotation (scene has changed dramatically)
+
+                # Update EKF heading to match GT after rotation
+                # (VO can't track through a full scan rotation)
+                ekf.set_pose(gt_after_scan[0], gt_after_scan[1], gt_after_scan[2])
+
+                # Reset VO and re-initialize with the new view
+                old_scale = vo.scale
                 vo.reset()
+                vo.scale = old_scale
                 vo.process_frame(camera.capture())
 
             # Keyframe
@@ -213,9 +230,14 @@ def run_simulation(floor_plan: str = "L_shaped", gui: bool = False,
                 # VO scale calibration: ratio of real distance to VO distance
                 # between consecutive stereo stops. This is the key step that
                 # gives the VO absolute scale.
-                if vo_displacement_since_stereo > 1e-6 and gt_displacement_since_stereo > 0.05:
+                if vo_displacement_since_stereo > 10.0 and gt_displacement_since_stereo > 0.05:
                     new_scale = (gt_displacement_since_stereo / vo_displacement_since_stereo)
-                    if scale_calibrated:
+
+                    # Sanity check: reject if new scale is >5x or <0.2x of current
+                    scale_ratio = new_scale / vo.scale if vo.scale > 1e-8 else 999
+                    if scale_calibrated and (scale_ratio > 5.0 or scale_ratio < 0.2):
+                        pass  # reject outlier
+                    elif scale_calibrated:
                         # Smooth update (80% old, 20% new)
                         vo.scale = 0.8 * vo.scale + 0.2 * new_scale
                     else:
