@@ -64,6 +64,32 @@ Ran on the real robot (`ssh pi@192.168.0.32`, pw `yahboom`). See root
    connects fine (`0x2b`).
 4. Vendor code lives on the Pi at `~/project_demo/raspbot/` and
    `~/py_install/` (not in git). Repo cloned to `~/rover` on the Pi.
+5. **IR remote register idles at 0xFF** (255), not 0 — verified on hardware.
+   `sensors.read_ir_remote()` must treat both 0 and 255 as "no key", or the
+   chase loop's IR kill switch fires instantly at startup (it did). Also the
+   receiver must be powered on first: `Ctrl_IR_Switch(1)` (exposed as
+   `Sensors.enable_ir()`, called by `ChaseController.run()`).
+
+### Wheels-off hardware test results (2026-09-06)
+
+`python3 -m catchaser.chase --forward-speed 0 --search-speed 0` with a phone
+cat-photo, rover propped up:
+- Sign convention verified: photo right of center → `+err`/`+turn`
+  (clockwise); left → negative. Proportional, symmetric, deadband quiet when
+  centered.
+- Grace-hold (3 frames) → search-spin transitions clean; spin runs at
+  `turn=+50` and physically rotates the wheels.
+- Ultrasonic HOLD engages at <200 mm (phone/hand in front) — forward locked
+  to 0, steering stays live.
+- **Bonus: the detector locked onto the actual house cat at ~1–3.5 m** for
+  ~35 straight frames (stable `err≈-0.05`, in-deadband). First real-cat
+  contact: PASS.
+- Detector in-loop: ~43 ms/frame; effective loop ~6 Hz (0.1 s period + capture
+  + inference).
+- ⚠️ Still unverified on hardware: IR-remote kill (post-fix), forward-drive
+  TRACKING, and SEARCHING→TRACKING reacquire — the phone photo was never
+  detected in the full-loop run (screen glare/angle defeats the detector;
+  a printed photo works better).
 
 ---
 

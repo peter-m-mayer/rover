@@ -94,17 +94,27 @@ class Sensors:
         except Exception:
             return (False, False, False, False)
 
+    def enable_ir(self):
+        """Power on the IR receiver (required before keypresses register)."""
+        if self._bot is not None:
+            try:
+                self._bot.Ctrl_IR_Switch(1)
+            except Exception:
+                pass
+
     def read_ir_remote(self) -> Optional[int]:
         """Read IR remote key code.
 
         Returns:
             Key code integer, or None if no key pressed.
+            The register idles at 0xFF (255) with no key down — verified on
+            hardware — so both 0 and 255 mean "no key".
         """
         if self._bot is None:
             return None
         try:
             data = self._bot.read_data_array(0x0C, 1)
             code = int(data[0])
-            return code if code != 0 else None
+            return code if code not in (0, 255) else None
         except Exception:
             return None

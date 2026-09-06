@@ -225,6 +225,10 @@ class ChaseController:
                 self.sensors.enable_ultrasonic()
             except Exception:
                 pass
+            try:
+                self.sensors.enable_ir()   # kill switch needs the receiver on
+            except AttributeError:
+                pass  # sim/mock sensors may not have IR
 
         self.reset()
         last = DriveCommand(0.0, 0.0, STATE_IDLE)

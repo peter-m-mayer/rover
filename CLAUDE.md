@@ -2,12 +2,17 @@
 
 ## The physical robot (Yahboom RASPBOT-V2)
 
-- **Reachable at `192.168.0.32`** — DHCP lease from the TP-Link router on the
-  `192.168.0.x` LAN (same subnet as the dev machine).
-  - ⚠️ The old **`192.168.1.11` is a dead relic — do NOT use it.** (It was a
-    stale address; a *different* device answered ARP for it but dropped all IP
-    traffic, which burned a lot of debugging time. The Pi was never there.)
-- **SSH:** `ssh pi@192.168.0.32` — password **`yahboom`**.
+- **WiFi (untethered): `192.168.0.35`** — Pi 5 built-in WiFi on `LomasV_5G`,
+  DHCP from the TP-Link router. This is the address for floor runs.
+- **Ethernet (when plugged): `192.168.0.32`** — same router.
+- **SSH:** `ssh pi@192.168.0.35` (or `.32` wired) — user `pi`, password
+  **`yahboom`**; the dev machine's key is installed, so no password needed.
+  - ⚠️ The old **`192.168.1.11` is dead — do NOT use it.** Post-mortem: that
+    was the Pi's *WiFi* address from a leftover NetworkManager profile named
+    `Raspbot` (hidden SSID, isolated network — ARP answered but all IP traffic
+    dropped, which burned hours). That profile is now **autoconnect-disabled**;
+    the Pi joins `LomasV_5G` on boot instead. The OLED may show a stale address
+    right after boot — trust `nmcli`/router DHCP list, not the OLED.
 - **Board:** Raspberry Pi 5, **64-bit OS (aarch64)** → **ONNX Runtime** is the
   inference path for the cat detector (onnxruntime wheels are aarch64-only; this
   board qualifies).
