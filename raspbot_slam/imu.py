@@ -413,7 +413,10 @@ class IMU:
             # Double-integrate: dx = 0.5 * ax * dt^2 (first-order approximation)
             # This is only useful for short intervals -- accel drift is severe
             # over longer periods. VO corrects this every ~100ms.
-            ax, ay = self.accel_xy
+            # Read _accel_raw directly: the accel_xy property re-acquires
+            # self._lock (non-reentrant), which we already hold — deadlock.
+            ax = float(self._accel_raw[0])
+            ay = float(self._accel_raw[1])
             dx = 0.5 * ax * dt * dt
             dy = 0.5 * ay * dt * dt
 
