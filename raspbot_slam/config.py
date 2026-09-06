@@ -97,6 +97,11 @@ CHASE_MAX_SPEED = 120              # cap on any single wheel magnitude (of 255)
 CHASE_TURN_MAX = 90                # clamp on the turn command
 CHASE_STOP_MM = OBSTACLE_STOP_MM   # ultrasonic stop distance (200 mm) — don't maul the cat
 CHASE_SEARCH_SPIN_SPEED = 50       # in-place spin speed while hunting for a lost cat
+# Pulsed search ("spin-and-stare"): at ~6 Hz loop the robot sweeps a large
+# fraction of the ~65 deg FOV per frame and motion blur kills detection while
+# rotating, so alternate short spin bursts with stationary look frames.
+CHASE_SEARCH_SPIN_FRAMES = 2       # frames of spinning per search cycle
+CHASE_SEARCH_STARE_FRAMES = 3      # stationary detection frames per cycle
 CHASE_LOST_GRACE_FRAMES = 3        # hold position this many lost frames before search-spin
 CHASE_CENTER_DEADBAND = 0.06       # |err| below this counts as centered (no turn)
 CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forward drive

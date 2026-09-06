@@ -167,6 +167,17 @@ class TestSearchBehavior:
         cmd2 = c2.compute([], distance_mm=1000)
         assert cmd2.turn < 0
 
+    def test_search_pulses_spin_and_stare(self):
+        # Spin 2, stare 3 (defaults) — pattern must repeat after grace.
+        c = make_controller(lost_grace_frames=0, search_spin_frames=2,
+                            search_stare_frames=3)
+        c.compute([cat_at(W * 0.9)], distance_mm=1000)   # seed last-seen side
+        pattern = []
+        for _ in range(10):
+            cmd = c.compute([], distance_mm=1000)
+            pattern.append("spin" if cmd.turn != 0 else "stare")
+        assert pattern == ["spin", "spin", "stare", "stare", "stare"] * 2
+
     def test_reacquire_resets_lost_counter(self):
         c = make_controller(lost_grace_frames=1)
         for _ in range(5):

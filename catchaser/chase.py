@@ -83,6 +83,8 @@ class ChaseController:
                  turn_max: float = config.CHASE_TURN_MAX,
                  stop_mm: int = config.CHASE_STOP_MM,
                  search_speed: float = config.CHASE_SEARCH_SPIN_SPEED,
+                 search_spin_frames: int = config.CHASE_SEARCH_SPIN_FRAMES,
+                 search_stare_frames: int = config.CHASE_SEARCH_STARE_FRAMES,
                  lost_grace_frames: int = config.CHASE_LOST_GRACE_FRAMES,
                  center_deadband: float = config.CHASE_CENTER_DEADBAND,
                  turn_only_error: float = config.CHASE_TURN_ONLY_ERROR,
@@ -96,6 +98,8 @@ class ChaseController:
         self.turn_max = turn_max
         self.stop_mm = stop_mm
         self.search_speed = search_speed
+        self.search_spin_frames = max(1, int(search_spin_frames))
+        self.search_stare_frames = max(0, int(search_stare_frames))
         self.lost_grace_frames = lost_grace_frames
         self.center_deadband = center_deadband
         self.turn_only_error = turn_only_error
@@ -164,14 +168,25 @@ class ChaseController:
         return DriveCommand(forward, turn, STATE_TRACKING, err, distance_mm)
 
     def _handle_lost(self) -> DriveCommand:
-        """No cat this frame: grace-hold briefly, then search-spin."""
+        """No cat this frame: grace-hold, then pulsed search (spin-and-stare).
+
+        Continuous spinning outruns the detector: at ~6 Hz loop rate the
+        robot sweeps a large share of the FOV between frames and motion blur
+        smears the cat during capture. So the search alternates short spin
+        bursts with stationary "stare" frames where detection gets a sharp,
+        stable image.
+        """
         self._frames_lost += 1
         self._integral = 0.0
         self._prev_error = 0.0
         if self._frames_lost <= self.lost_grace_frames:
             return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold")
-        turn = self._last_seen_sign * self.search_speed
-        return DriveCommand(0.0, turn, STATE_SEARCHING, note="search spin")
+        cycle_pos = (self._frames_lost - self.lost_grace_frames - 1) % (
+            self.search_spin_frames + self.search_stare_frames)
+        if cycle_pos < self.search_spin_frames:
+            turn = self._last_seen_sign * self.search_speed
+            return DriveCommand(0.0, turn, STATE_SEARCHING, note="search spin")
+        return DriveCommand(0.0, 0.0, STATE_SEARCHING, note="search stare")
 
     def _cap(self, forward, turn):
         """Scale (forward, turn) so no wheel exceeds max_speed.
@@ -336,6 +351,9 @@ def main(argv=None) -> int:
                         default=config.CHASE_MIN_CONFIDENCE)
     parser.add_argument("--quiet", action="store_true",
                         help="only print state changes, not every frame")
+    parser.add_argument("--save-dir", default=None,
+                        help="save annotated frames on detection (max 1/s, "
+                             "cap 200) for post-run review")
     args = parser.parse_args(argv)
 
     from .detector import CatDetector
@@ -372,8 +390,28 @@ def main(argv=None) -> int:
                   f"det={detector.last_inference_ms:5.1f}ms"
                   f"{'  <-- ' + cmd.note if cmd.note else ''}")
 
+    saver = {"last_t": 0.0, "n": 0}
+    if args.save_dir:
+        import os
+        os.makedirs(args.save_dir, exist_ok=True)
+
     def perceive():
-        return detector.detect(camera.capture_color())
+        frame = camera.capture_color()
+        dets = detector.detect(frame)
+        if args.save_dir and dets and saver["n"] < 200:
+            t = time.monotonic()
+            if t - saver["last_t"] >= 1.0:
+                saver["last_t"] = t
+                saver["n"] += 1
+                import cv2
+                for d in dets:
+                    cv2.rectangle(frame, (int(d.x1), int(d.y1)),
+                                  (int(d.x2), int(d.y2)), (0, 255, 0), 2)
+                    cv2.putText(frame, f"{d.confidence:.2f}",
+                                (int(d.x1), max(15, int(d.y1) - 5)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.imwrite(f"{args.save_dir}/det_{saver['n']:03d}.jpg", frame)
+        return dets
 
     try:
         last = controller.run(
