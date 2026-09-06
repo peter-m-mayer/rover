@@ -367,8 +367,10 @@ def main(argv=None) -> int:
     parser.add_argument("--quiet", action="store_true",
                         help="only print state changes, not every frame")
     parser.add_argument("--save-dir", default=None,
-                        help="save annotated frames on detection (max 1/s, "
-                             "cap 200) for post-run review")
+                        help="harvest a training dataset here: clean frames + "
+                             "YOLO weak labels + annotated previews. "
+                             "Detections at most 1/s, negatives 1/10s, cap 300. "
+                             "Review afterwards with: python3 -m catchaser.review <dir>")
     args = parser.parse_args(argv)
 
     from .detector import CatDetector
@@ -405,27 +407,31 @@ def main(argv=None) -> int:
                   f"det={detector.last_inference_ms:5.1f}ms"
                   f"{'  <-- ' + cmd.note if cmd.note else ''}")
 
-    saver = {"last_t": 0.0, "n": 0}
-    if args.save_dir:
-        import os
-        os.makedirs(args.save_dir, exist_ok=True)
+    saver = {"last_det": 0.0, "last_neg": 0.0, "n": 0}
+    run_tag = time.strftime("%Y%m%d_%H%M%S")
+
+    def maybe_harvest(frame, dets):
+        """Rate-limited dataset capture: detections 1/s, negatives 1/10s."""
+        if not args.save_dir or saver["n"] >= 300:
+            return
+        t = time.monotonic()
+        if dets:
+            if t - saver["last_det"] < 1.0:
+                return
+            saver["last_det"] = t
+        else:
+            # Occasional empty frames = clean negatives / background images.
+            if t - saver["last_neg"] < 10.0:
+                return
+            saver["last_neg"] = t
+        saver["n"] += 1
+        from .dataset import save_sample
+        save_sample(args.save_dir, f"{run_tag}_{saver['n']:04d}", frame, dets)
 
     def perceive():
         frame = camera.capture_color()
         dets = detector.detect(frame)
-        if args.save_dir and dets and saver["n"] < 200:
-            t = time.monotonic()
-            if t - saver["last_t"] >= 1.0:
-                saver["last_t"] = t
-                saver["n"] += 1
-                import cv2
-                for d in dets:
-                    cv2.rectangle(frame, (int(d.x1), int(d.y1)),
-                                  (int(d.x2), int(d.y2)), (0, 255, 0), 2)
-                    cv2.putText(frame, f"{d.confidence:.2f}",
-                                (int(d.x1), max(15, int(d.y1) - 5)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.imwrite(f"{args.save_dir}/det_{saver['n']:03d}.jpg", frame)
+        maybe_harvest(frame, dets)
         return dets
 
     try:

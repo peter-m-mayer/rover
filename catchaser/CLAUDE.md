@@ -95,6 +95,21 @@ approach sequence) — first successful chase. What the data taught us:
   solid; every failure was control-side. Revisit only if a *second* pet needs
   discriminating.
 
+### Training-data pipeline (2026-09-06)
+
+End-to-end path from chase runs to a fine-tuning dataset (only needed if a
+second pet ever requires discrimination — recognition itself is solid):
+
+1. **Harvest** during any chase: `python3 -m catchaser.chase --save-dir datasets/<name>`
+   → `images/` (clean frames), `labels/` (YOLO weak labels from the detector,
+   class 0; empty = negative), `preview/` (annotated, for humans). Detections
+   ≤1/s, negatives ≤1/10 s, 300-frame cap. `catchaser/dataset.py`.
+2. **Triage** from the couch: `python3 -m catchaser.review datasets/<name>`
+   → phone at `http://<pi-ip>:5000`; g=Good / n=No cat / f=Fix (Fix copies
+   into `review_fix/` for a real box editor); lossless undo/resume.
+3. **Train** elsewhere (ultralytics on a PC), export ONNX 320 px opset 12,
+   drop into `catchaser/models/`.
+
 Ideas not yet implemented, in rough value order:
 1. **Pan-servo search**: sweep the camera (0-180°) with the chassis parked —
    sharp frames, 3× FOV coverage, no blur. Needs one hardware check first:
