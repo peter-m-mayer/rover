@@ -28,6 +28,8 @@ its internal PID state) and takes plain inputs — so it is unit-testable
 without any hardware or simulator. run() wires it to real or simulated I/O.
 """
 
+import argparse
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional
@@ -300,3 +302,92 @@ def run_hardware_chase(camera, detector, sensors, actuators, **kwargs) -> DriveC
             camera.close()
         except Exception:
             pass
+
+
+def main(argv=None) -> int:
+    """Run the chase loop on the real robot.
+
+        python3 -m catchaser.chase                      # full chase
+        python3 -m catchaser.chase --max-runtime 30     # timed session
+        python3 -m catchaser.chase --forward-speed 0    # steer-only (bench test)
+
+    Stop with Ctrl+C or any IR-remote key. Motors always stop on exit.
+    """
+    parser = argparse.ArgumentParser(description="Cat Chaser 3000 — chase loop")
+    parser.add_argument("--max-runtime", type=float, default=120.0,
+                        help="stop after this many seconds (default 120; safety)")
+    parser.add_argument("--max-frames", type=int, default=None,
+                        help="stop after this many frames")
+    parser.add_argument("--forward-speed", type=float,
+                        default=config.CHASE_FORWARD_SPEED,
+                        help="base approach speed (0 = steer/spin only)")
+    parser.add_argument("--max-speed", type=float, default=config.CHASE_MAX_SPEED,
+                        help="per-wheel speed cap")
+    parser.add_argument("--search-speed", type=float,
+                        default=config.CHASE_SEARCH_SPIN_SPEED,
+                        help="search-spin speed (0 = hold still when cat lost)")
+    parser.add_argument("--stop-mm", type=int, default=config.CHASE_STOP_MM,
+                        help="ultrasonic hold distance in mm")
+    parser.add_argument("--min-confidence", type=float,
+                        default=config.CHASE_MIN_CONFIDENCE)
+    parser.add_argument("--quiet", action="store_true",
+                        help="only print state changes, not every frame")
+    args = parser.parse_args(argv)
+
+    from .detector import CatDetector
+    from .hw import make_hardware
+
+    bot, camera, sensors, actuators = make_hardware()
+    if bot is None:
+        print("[chase] vendor driver not found — refusing to run the chase "
+              "loop in mock mode (nothing would move). Run on the robot.")
+        return 2
+
+    detector = CatDetector()
+    controller = ChaseController(
+        actuators, sensors,
+        forward_speed=args.forward_speed, max_speed=args.max_speed,
+        search_speed=args.search_speed, stop_mm=args.stop_mm,
+        min_confidence=args.min_confidence)
+
+    print(f"[chase] starting: forward={args.forward_speed} max={args.max_speed} "
+          f"stop={args.stop_mm}mm runtime={args.max_runtime}s")
+    print("[chase] kill: Ctrl+C or any IR-remote key")
+
+    frame_n = [0]
+    last_state = [None]
+
+    def on_step(cmd):
+        frame_n[0] += 1
+        changed = cmd.state != last_state[0]
+        last_state[0] = cmd.state
+        if changed or not args.quiet:
+            print(f"  f{frame_n[0]:04d} {cmd.state:9s} "
+                  f"err={cmd.heading_error:+.2f} fwd={cmd.forward:5.1f} "
+                  f"turn={cmd.turn:+6.1f} us={cmd.distance_mm:5d}mm "
+                  f"det={detector.last_inference_ms:5.1f}ms"
+                  f"{'  <-- ' + cmd.note if cmd.note else ''}")
+
+    def perceive():
+        return detector.detect(camera.capture_color())
+
+    try:
+        last = controller.run(
+            perceive, sensors.read_ultrasonic_mm,
+            on_step=on_step,
+            max_frames=args.max_frames,
+            max_runtime_s=args.max_runtime)
+        print(f"[chase] done after {frame_n[0]} frames "
+              f"(exit: {last.note or 'runtime/frame limit'})")
+    except KeyboardInterrupt:
+        print("\n[chase] Ctrl+C — motors stopped.")
+    finally:
+        try:
+            camera.close()
+        except Exception:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
