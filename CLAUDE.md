@@ -2,9 +2,16 @@
 
 ## The physical robot (Yahboom RASPBOT-V2)
 
-- **WiFi (untethered): `192.168.0.35`** — Pi 5 built-in WiFi on `LomasV_5G`,
-  DHCP from the TP-Link router. This is the address for floor runs.
+- **WiFi (untethered):** Pi 5 built-in WiFi on `LomasV_5G`, DHCP from the
+  TP-Link router — but **the lease moves between boots** (seen: `.35`, then
+  `.113` on 2026-09-06). Find it by ping-sweeping port 22 on `192.168.0.x`,
+  or fix it permanently with a **DHCP reservation** in the TP-Link admin page
+  (recommended; MAC is the wlan0 one).
 - **Ethernet (when plugged): `192.168.0.32`** — same router.
+- **Phone-driven operation:** helper scripts live on the Pi —
+  `./harvest.sh [secs]` (10 s countdown, chase + dataset harvest, prints
+  summary) and `./review.sh` (triage server on the newest dataset; open
+  `http://<pi-ip>:5000`). SSH from any phone SSH app: `pi`/`yahboom`.
 - **SSH:** `ssh pi@192.168.0.35` (or `.32` wired) — user `pi`, password
   **`yahboom`**; the dev machine's key is installed, so no password needed.
   - ⚠️ The old **`192.168.1.11` is dead — do NOT use it.** Post-mortem: that
