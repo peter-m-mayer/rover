@@ -118,6 +118,29 @@ CHASE_LOOP_HZ = 20                 # loop pacing cap; detector (~50 ms) is the
 CHASE_APPROACH_TAPER_MM = 400      # start slowing this far beyond stop range
 CHASE_APPROACH_MIN_FACTOR = 0.35   # floor of the close-range speed taper
 
+# --- Pan-servo tracking (camera tracks the cat; the body follows the pan) ----
+# The camera pan servo re-centers the cat in-frame far faster (and with far
+# less motion blur) than spinning the whole chassis. The body then rotates to
+# follow the pan back toward center. Off by default until the servo direction
+# is confirmed on hardware (flip CHASE_PAN_SIGN if it tracks the wrong way).
+CHASE_PAN_ENABLED = False
+CHASE_PAN_GAIN = 22.0              # degrees of pan correction per unit err/frame
+CHASE_PAN_SIGN = 1                 # +1 = sim (pan>90 looks left); -1 if hw differs
+CHASE_PAN_FOLLOW_K = 0.9          # body turn (motor units) per degree of pan offset
+CHASE_PAN_DEADBAND_DEG = 4.0       # don't chase tiny pan offsets with the body
+CHASE_PAN_TURN_ONLY_DEG = 55.0     # if pan is past this, stop forward, let body catch up
+
+# --- Prey / play mode (behavioral: dart, freeze, flee — what cats hunt) ------
+# Relentless smooth pursuit reads as boring or threatening. Prey darts and
+# FREEZES (the pause triggers the pounce), zig-zags (mecanum strafe), and
+# FLEES when the cat charges — the single most engaging move for a cat.
+CHASE_PREY_DART_FRAMES = 4         # frames of darting per cycle
+CHASE_PREY_FREEZE_FRAMES = 5       # frames frozen per cycle (pounce bait)
+CHASE_PREY_DART_SPEED = 70         # forward speed while darting
+CHASE_PREY_STRAFE = 55             # lateral zig-zag magnitude (alternates per cycle)
+CHASE_PREY_FLEE_MM = 300           # cat within this -> flee (back away)
+CHASE_PREY_FLEE_SPEED = 90         # retreat speed when fleeing
+
 # =============================================================================
 # Camera
 # =============================================================================

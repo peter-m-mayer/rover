@@ -144,14 +144,28 @@ half the detector rate — and adding tracking latency. Fixed to sleep only the
 period *remainder*, so the detector (~15 Hz) is the limiter. Higher loop rate
 = tighter centroid tracking. See [[chase-controller]] tuning.
 
-Ideas not yet implemented, in rough value order:
-1. **Pan-servo search**: sweep the camera (0-180°) with the chassis parked —
-   sharp frames, 3× FOV coverage, no blur. Needs one hardware check first:
-   servo direction sign vs. sim convention (pan>90 = camera left in sim).
-   On detection at pan θ: body heading error = cam_err − (θ−90)/32.5, then
-   recenter pan.
+### Pan-servo tracking + prey mode (2026-09-07) — built, sim-validated
+
+- **Pan tracking** (`--pan`, `CHASE_PAN_*`): the camera servo tracks the
+  centroid; the body turn just follows the pan back toward center. Sim result:
+  mean |err| 0.067 → **0.026** (2.5× tighter centering). ⚠️ **Hardware check
+  before trusting it:** confirm servo direction — if the camera pans the wrong
+  way, flip `CHASE_PAN_SIGN` to -1. (Sim convention: pan>90 = look left.)
+  Default `CHASE_PAN_ENABLED=False` until that check passes.
+- **Prey mode** (`--prey`, `CHASE_PREY_*`): motion policy = DART (mecanum
+  zig-zag, alternating per cycle) → FREEZE (fully still, the pounce bait) →
+  and FLEE when the cat closes within `CHASE_PREY_FLEE_MM` (300 mm). Heading
+  tracking (pan or PID) still centers the cat throughout. LEDs: DART green,
+  FREEZE white, FLEE purple. Composable with `--pan`.
+- **Loop rate**: also fixed the self-throttling sleep (~6→~15 Hz) — see above.
+- Run: `python3 -m catchaser.chase --pan --prey` (hardware) or
+  `python3 -m catchaser.chase_sim --scenario approach --pan --prey --verbose`.
+
+Still open, in rough value order:
+1. **Hardware servo-sign check** for pan (30 s wheels-off test).
 2. Exposure control: shorter camera exposure (v4l2) to cut rotation blur.
 3. Centroid velocity prediction (lead pursuit) once tracking is stable.
+4. Pan *sweep* during SEARCH (park body, sweep camera) — bigger FOV, no blur.
 
 ### Wheels-off hardware test results (2026-09-06)
 

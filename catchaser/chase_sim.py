@@ -24,7 +24,8 @@ import pybullet as p
 from raspbot_slam import config
 from raspbot_slam.simulator import SimWorld, SimCamera, SimSensors, SimActuators
 
-from .chase import ChaseController, STATE_HOLD, STATE_SEARCHING, STATE_TRACKING
+from .chase import (ChaseController, STATE_HOLD, STATE_SEARCHING, STATE_TRACKING,
+                    STATE_DART, STATE_FREEZE, STATE_FLEE)
 from .detector import COCO_CAT, Detection
 
 
@@ -91,7 +92,8 @@ SCENARIOS = {
 
 def run_chase_sim(scenario: str = "approach", gui: bool = False,
                   max_frames: int = 400, period_s: float = 0.1,
-                  floor_plan: str = "simple_room", verbose: bool = False) -> dict:
+                  floor_plan: str = "simple_room", verbose: bool = False,
+                  use_pan: bool = False, mode: str = "chase") -> dict:
     """Run one closed-loop chase in the simulator and return a result summary."""
     spec = SCENARIOS[scenario]
     world = SimWorld(floor_plan=floor_plan, gui=gui, start_pose=spec["rover"])
@@ -101,7 +103,7 @@ def run_chase_sim(scenario: str = "approach", gui: bool = False,
         camera = SimCamera(world)
         sensors = SimSensors(world)
         actuators = SimActuators(world)
-        controller = ChaseController(actuators, sensors)
+        controller = ChaseController(actuators, sensors, use_pan=use_pan, mode=mode)
         perceive = make_synthetic_detector(world, camera, cat_xy)
 
         def range_to_cat_mm():
@@ -111,6 +113,7 @@ def run_chase_sim(scenario: str = "approach", gui: bool = False,
 
         trajectory = []
         states = []
+        errors = []
         min_range = [float("inf")]
 
         def on_step(cmd):
@@ -118,10 +121,15 @@ def run_chase_sim(scenario: str = "approach", gui: bool = False,
             rx, ry, yaw = world.get_robot_pose()
             trajectory.append((rx, ry, yaw))
             states.append(cmd.state)
+            if cmd.state in (STATE_TRACKING, STATE_HOLD, STATE_DART,
+                             STATE_FREEZE, STATE_FLEE):
+                errors.append(abs(cmd.heading_error))
             min_range[0] = min(min_range[0], range_to_cat_mm())
             if verbose:
+                pan = f" pan={cmd.pan:5.1f}" if cmd.pan is not None else ""
+                strafe = f" str={cmd.strafe:+5.1f}" if cmd.strafe else ""
                 print(f"  {cmd.state:9s} err={cmd.heading_error:+.2f} "
-                      f"fwd={cmd.forward:5.1f} turn={cmd.turn:+6.1f} "
+                      f"fwd={cmd.forward:5.1f} turn={cmd.turn:+6.1f}{strafe}{pan} "
                       f"range={range_to_cat_mm():4d}mm")
 
         # Use sim time as the clock; don't wall-sleep unless showing the GUI.
@@ -142,8 +150,14 @@ def run_chase_sim(scenario: str = "approach", gui: bool = False,
             # Success: closed to the stop band and never rammed the cat.
             "reached": final_range <= controller.stop_mm + 60,
             "no_collision": min_range[0] >= 30,   # never drove into the box
-            "acquired": STATE_TRACKING in states or STATE_HOLD in states,
+            "acquired": STATE_TRACKING in states or STATE_HOLD in states
+                        or STATE_DART in states or STATE_FREEZE in states
+                        or STATE_FLEE in states,
             "searched": STATE_SEARCHING in states,
+            "darted": STATE_DART in states,
+            "froze": STATE_FREEZE in states,
+            "fled": STATE_FLEE in states,
+            "mean_abs_err": round(sum(errors) / len(errors), 3) if errors else None,
             "frames": len(states),
             "final_xy": (round(rx, 3), round(ry, 3)),
             "trajectory": trajectory,
@@ -159,18 +173,27 @@ def main(argv=None) -> int:
     ap.add_argument("--gui", action="store_true")
     ap.add_argument("--max-frames", type=int, default=400)
     ap.add_argument("--floor-plan", default="simple_room")
+    ap.add_argument("--pan", action="store_true", help="camera pan tracking")
+    ap.add_argument("--prey", action="store_true", help="prey/play mode")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
+    mode = "prey" if args.prey else "chase"
     r = run_chase_sim(args.scenario, gui=args.gui, max_frames=args.max_frames,
-                      floor_plan=args.floor_plan, verbose=args.verbose)
-    print(f"\nscenario={r['scenario']}  frames={r['frames']}")
+                      floor_plan=args.floor_plan, verbose=args.verbose,
+                      use_pan=args.pan, mode=mode)
+    print(f"\nscenario={r['scenario']}  mode={mode}  pan={args.pan}  frames={r['frames']}")
     print(f"  acquired cat : {r['acquired']}   searched: {r['searched']}")
-    print(f"  final range  : {r['final_range_mm']} mm  (stop at {r['stop_mm']} mm)")
+    print(f"  mean |err|   : {r['mean_abs_err']}  (tracking tightness)")
     print(f"  min range    : {r['min_range_mm']} mm  (no-collision: {r['no_collision']})")
     print(f"  final xy     : {r['final_xy']}")
-    ok = r["reached"] and r["no_collision"] and r["acquired"]
-    print("RESULT:", "PASS — cat cornered." if ok else "FAIL — see above.")
+    if mode == "prey":
+        print(f"  prey moves   : darted={r['darted']} froze={r['froze']} fled={r['fled']}")
+        ok = r["acquired"] and r["no_collision"] and r["froze"]
+    else:
+        print(f"  final range  : {r['final_range_mm']} mm  (stop at {r['stop_mm']} mm)")
+        ok = r["reached"] and r["no_collision"] and r["acquired"]
+    print("RESULT:", "PASS." if ok else "FAIL — see above.")
     return 0 if ok else 1
 
 

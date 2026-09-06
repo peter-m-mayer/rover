@@ -45,6 +45,9 @@ STATE_TRACKING = "TRACKING"
 STATE_LOST = "LOST"
 STATE_SEARCHING = "SEARCHING"
 STATE_HOLD = "HOLD"
+STATE_DART = "DART"          # prey mode: darting toward/around the cat
+STATE_FREEZE = "FREEZE"      # prey mode: frozen still (pounce bait)
+STATE_FLEE = "FLEE"          # prey mode: retreating from a close cat
 
 _STATE_LED = {
     STATE_IDLE: "off",
@@ -52,6 +55,9 @@ _STATE_LED = {
     STATE_LOST: "yellow",
     STATE_SEARCHING: "red",
     STATE_HOLD: "cyan",
+    STATE_DART: "green",
+    STATE_FREEZE: "white",
+    STATE_FLEE: "purple",
 }
 
 
@@ -64,6 +70,8 @@ class DriveCommand:
     heading_error: float = 0.0
     distance_mm: int = -1
     note: str = ""
+    strafe: float = 0.0
+    pan: Optional[float] = None   # camera pan angle to command, or None
 
 
 def _clamp(v, lo, hi):
@@ -88,7 +96,20 @@ class ChaseController:
                  lost_grace_frames: int = config.CHASE_LOST_GRACE_FRAMES,
                  center_deadband: float = config.CHASE_CENTER_DEADBAND,
                  turn_only_error: float = config.CHASE_TURN_ONLY_ERROR,
-                 min_confidence: float = config.CHASE_MIN_CONFIDENCE):
+                 min_confidence: float = config.CHASE_MIN_CONFIDENCE,
+                 mode: str = "chase",
+                 use_pan: bool = config.CHASE_PAN_ENABLED,
+                 pan_gain: float = config.CHASE_PAN_GAIN,
+                 pan_sign: int = config.CHASE_PAN_SIGN,
+                 pan_follow_k: float = config.CHASE_PAN_FOLLOW_K,
+                 pan_deadband: float = config.CHASE_PAN_DEADBAND_DEG,
+                 pan_turn_only_deg: float = config.CHASE_PAN_TURN_ONLY_DEG,
+                 prey_dart_frames: int = config.CHASE_PREY_DART_FRAMES,
+                 prey_freeze_frames: int = config.CHASE_PREY_FREEZE_FRAMES,
+                 prey_dart_speed: float = config.CHASE_PREY_DART_SPEED,
+                 prey_strafe: float = config.CHASE_PREY_STRAFE,
+                 prey_flee_mm: int = config.CHASE_PREY_FLEE_MM,
+                 prey_flee_speed: float = config.CHASE_PREY_FLEE_SPEED):
         self.actuators = actuators
         self.sensors = sensors
         self.image_width = image_width
@@ -104,15 +125,30 @@ class ChaseController:
         self.center_deadband = center_deadband
         self.turn_only_error = turn_only_error
         self.min_confidence = min_confidence
+        self.mode = mode
+        self.use_pan = use_pan
+        self.pan_gain = pan_gain
+        self.pan_sign = pan_sign
+        self.pan_follow_k = pan_follow_k
+        self.pan_deadband = pan_deadband
+        self.pan_turn_only_deg = pan_turn_only_deg
+        self.prey_dart_frames = max(1, int(prey_dart_frames))
+        self.prey_freeze_frames = max(0, int(prey_freeze_frames))
+        self.prey_dart_speed = prey_dart_speed
+        self.prey_strafe = prey_strafe
+        self.prey_flee_mm = prey_flee_mm
+        self.prey_flee_speed = prey_flee_speed
         self.reset()
 
     def reset(self):
-        """Clear PID state and search memory."""
+        """Clear PID state, search memory, pan angle, prey cycle."""
         self._integral = 0.0
         self._prev_error = 0.0
         self._have_prev = False      # no D-term until a second tracked frame
         self._frames_lost = 0
         self._last_seen_sign = 1.0   # default: search to the right first
+        self._pan = float(config.SERVO_PAN_CENTER)
+        self._prey_i = 0
 
     # ------------------------------------------------------------------ core
     def compute(self, detections: List[Detection], distance_mm: int,
@@ -136,50 +172,101 @@ class ChaseController:
         if target is None:
             return self._handle_lost()
 
-        # --- cat visible: steer to center it -----------------------------
+        # --- cat visible -------------------------------------------------
         self._frames_lost = 0
         err = (target.cx - self.image_width / 2.0) / (self.image_width / 2.0)
         err = _clamp(err, -1.0, 1.0)
         self._last_seen_sign = 1.0 if err >= 0 else -1.0
-
         # Deadband: treat a nearly-centered cat as centered (no jitter).
         err_eff = 0.0 if abs(err) < self.center_deadband else err
 
-        # Heading PID -> turn command. The D-term needs two consecutive
-        # tracked frames — on a fresh acquisition prev_error is meaningless
-        # and would add a spurious kick toward overshoot.
+        # Keep the cat centered (camera pan and/or body turn) ...
+        turn, pan = self._heading(err_eff, dt)
+        # ... then decide how to move (approach, or dart/freeze/flee).
+        if self.mode == "prey":
+            return self._prey_policy(err, turn, pan, distance_mm)
+        return self._chase_policy(err, turn, pan, distance_mm)
+
+    # ---------------------------------------------------------------- heading
+    def _heading(self, err_eff, dt):
+        """Center the cat. Returns (body_turn, pan_angle_or_None).
+
+        Pan mode: the camera servo tracks the centroid (fast, low-blur) and the
+        body turn just follows the pan back toward center. Body mode: the
+        heading PID drives the body turn directly (pan stays None).
+        """
+        if self.use_pan:
+            self._pan = _clamp(
+                self._pan - self.pan_sign * self.pan_gain * err_eff,
+                config.SERVO_PAN_MIN, config.SERVO_PAN_MAX)
+            dev = self._pan - config.SERVO_PAN_CENTER
+            if abs(dev) < self.pan_deadband:
+                turn = 0.0
+            else:
+                turn = _clamp(-self.pan_sign * self.pan_follow_k * dev,
+                              -self.turn_max, self.turn_max)
+            return turn, self._pan
+
+        # Body-only PID. The D-term needs two consecutive tracked frames — on a
+        # fresh acquisition prev_error is meaningless and kicks toward overshoot.
         self._integral += err_eff * dt
-        if self._have_prev and dt > 0:
-            deriv = (err_eff - self._prev_error) / dt
-        else:
-            deriv = 0.0
+        deriv = (err_eff - self._prev_error) / dt if (self._have_prev and dt > 0) else 0.0
         self._prev_error = err_eff
         self._have_prev = True
         turn = self.kp * err_eff + self.ki * self._integral + self.kd * deriv
-        turn = _clamp(turn, -self.turn_max, self.turn_max)
+        return _clamp(turn, -self.turn_max, self.turn_max), None
 
-        # Ultrasonic emergency stop: close enough — hold, keep steering only.
-        if 0 < distance_mm <= self.stop_mm:
-            self._integral = 0.0
-            return DriveCommand(0.0, turn, STATE_HOLD, err, distance_mm,
-                                "ultrasonic stop")
+    def _off_axis_fraction(self, err):
+        """How far off-center are we, in [0, inf): 1.0 = the turn-only limit."""
+        if self.use_pan:
+            return abs(self._pan - config.SERVO_PAN_CENTER) / self.pan_turn_only_deg
+        return abs(err) / self.turn_only_error
 
-        # Forward speed: full when centered, tapering to 0 as the cat drifts;
-        # pure turn-in-place once it's past turn_only_error.
-        if abs(err) >= self.turn_only_error:
-            forward = 0.0
-        else:
-            forward = self.forward_speed * (1.0 - abs(err) / self.turn_only_error)
-
-        # Close-range taper: ease off as the ultrasonic closes on the stop
-        # band, so the final approach is gentle (and the camera stays inside
-        # its focus range longer) instead of charging to the 200 mm wall.
+    def _forward_toward(self, err, distance_mm):
+        """Approach speed with off-axis + close-range tapers (0 if too far off)."""
+        off = self._off_axis_fraction(err)
+        if off >= 1.0:
+            return 0.0
+        forward = self.forward_speed * (1.0 - off)
+        # Close-range taper: ease off as the ultrasonic closes on the stop band,
+        # so the final approach is gentle instead of charging the 200 mm wall.
         if forward > 0 and distance_mm > 0:
             frac = (distance_mm - self.stop_mm) / float(config.CHASE_APPROACH_TAPER_MM)
             forward *= _clamp(frac, config.CHASE_APPROACH_MIN_FACTOR, 1.0)
+        return forward
 
+    # ----------------------------------------------------------- motion policy
+    def _chase_policy(self, err, turn, pan, distance_mm):
+        """Steady pursuit: approach, taper, ultrasonic HOLD at stop distance."""
+        if 0 < distance_mm <= self.stop_mm:
+            self._integral = 0.0
+            return DriveCommand(0.0, turn, STATE_HOLD, err, distance_mm,
+                                "ultrasonic stop", pan=pan)
+        forward = self._forward_toward(err, distance_mm)
         forward, turn = self._cap(forward, turn)
-        return DriveCommand(forward, turn, STATE_TRACKING, err, distance_mm)
+        return DriveCommand(forward, turn, STATE_TRACKING, err, distance_mm, pan=pan)
+
+    def _prey_policy(self, err, turn, pan, distance_mm):
+        """Prey behavior: dart + zig-zag, FREEZE (pounce bait), FLEE when close."""
+        self._prey_i += 1
+        cycle = self.prey_dart_frames + self.prey_freeze_frames
+        zig = 1.0 if ((self._prey_i - 1) // cycle) % 2 == 0 else -1.0
+
+        # FLEE: the cat (or a wall) is close -> retreat, still facing it. A
+        # fleeing "prey" is the single most engaging move for a cat.
+        if 0 < distance_mm < self.prey_flee_mm:
+            f, t, s = self._cap3(-self.prey_flee_speed, turn, self.prey_strafe * zig)
+            return DriveCommand(f, t, STATE_FLEE, err, distance_mm, "flee",
+                                strafe=s, pan=pan)
+
+        phase = (self._prey_i - 1) % cycle
+        if phase < self.prey_dart_frames:
+            f, t, s = self._cap3(self.prey_dart_speed, turn, self.prey_strafe * zig)
+            return DriveCommand(f, t, STATE_DART, err, distance_mm, "dart",
+                                strafe=s, pan=pan)
+        # FREEZE: fully still (the pounce bait). Camera keeps watching via pan.
+        return DriveCommand(0.0, 0.0, STATE_FREEZE, err, distance_mm,
+                            "freeze (pounce bait)", pan=pan)
 
     def _handle_lost(self) -> DriveCommand:
         """No cat this frame: grace-hold, then pulsed search (spin-and-stare).
@@ -188,20 +275,24 @@ class ChaseController:
         robot sweeps a large share of the FOV between frames and motion blur
         smears the cat during capture. So the search alternates short spin
         bursts with stationary "stare" frames where detection gets a sharp,
-        stable image.
+        stable image. In pan mode the camera drifts back to center while lost.
         """
         self._frames_lost += 1
         self._integral = 0.0
         self._prev_error = 0.0
         self._have_prev = False
+        pan = None
+        if self.use_pan:
+            self._pan += _clamp(config.SERVO_PAN_CENTER - self._pan, -8.0, 8.0)
+            pan = self._pan
         if self._frames_lost <= self.lost_grace_frames:
-            return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold")
+            return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold", pan=pan)
         cycle_pos = (self._frames_lost - self.lost_grace_frames - 1) % (
             self.search_spin_frames + self.search_stare_frames)
         if cycle_pos < self.search_spin_frames:
             turn = self._last_seen_sign * self.search_speed
-            return DriveCommand(0.0, turn, STATE_SEARCHING, note="search spin")
-        return DriveCommand(0.0, 0.0, STATE_SEARCHING, note="search stare")
+            return DriveCommand(0.0, turn, STATE_SEARCHING, note="search spin", pan=pan)
+        return DriveCommand(0.0, 0.0, STATE_SEARCHING, note="search stare", pan=pan)
 
     def _cap(self, forward, turn):
         """Scale (forward, turn) so no wheel exceeds max_speed.
@@ -215,10 +306,28 @@ class ChaseController:
             turn *= k
         return forward, turn
 
+    def _cap3(self, forward, turn, strafe):
+        """Scale (forward, turn, strafe) so no wheel exceeds max_speed.
+
+        Worst-case wheel magnitude in the mecanum mix is |f| + |t| + |s|.
+        """
+        peak = abs(forward) + abs(turn) + abs(strafe)
+        if peak > self.max_speed and peak > 0:
+            k = self.max_speed / peak
+            forward *= k
+            turn *= k
+            strafe *= k
+        return forward, turn, strafe
+
     # -------------------------------------------------------------- actuation
     def apply(self, cmd: DriveCommand):
-        """Send a command to the wheels and reflect state on the LEDs."""
-        self.actuators.drive(cmd.forward, cmd.turn)
+        """Send a command to the wheels + camera, and reflect state on the LEDs."""
+        self.actuators.drive(cmd.forward, cmd.turn, cmd.strafe)
+        if cmd.pan is not None:
+            try:
+                self.actuators.set_servo_pan(cmd.pan)
+            except Exception:
+                pass
         try:
             self.actuators.set_led_color(_STATE_LED.get(cmd.state, "off"))
         except Exception:
@@ -370,6 +479,11 @@ def main(argv=None) -> int:
                         help="ultrasonic hold distance in mm")
     parser.add_argument("--min-confidence", type=float,
                         default=config.CHASE_MIN_CONFIDENCE)
+    parser.add_argument("--pan", action="store_true",
+                        help="camera pan-servo tracking (body follows the pan)")
+    parser.add_argument("--prey", action="store_true",
+                        help="prey/play mode: dart, freeze, and flee instead of "
+                             "steady pursuit (more engaging for the cat)")
     parser.add_argument("--quiet", action="store_true",
                         help="only print state changes, not every frame")
     parser.add_argument("--save-dir", default=None,
@@ -393,10 +507,12 @@ def main(argv=None) -> int:
         actuators, sensors,
         forward_speed=args.forward_speed, max_speed=args.max_speed,
         search_speed=args.search_speed, stop_mm=args.stop_mm,
-        min_confidence=args.min_confidence)
+        min_confidence=args.min_confidence,
+        mode="prey" if args.prey else "chase", use_pan=args.pan)
 
-    print(f"[chase] starting: forward={args.forward_speed} max={args.max_speed} "
-          f"stop={args.stop_mm}mm runtime={args.max_runtime}s")
+    print(f"[chase] starting: mode={'prey' if args.prey else 'chase'} "
+          f"pan={'on' if args.pan else 'off'} forward={args.forward_speed} "
+          f"max={args.max_speed} stop={args.stop_mm}mm runtime={args.max_runtime}s")
     print("[chase] kill: Ctrl+C or any IR-remote key")
 
     frame_n = [0]
@@ -407,9 +523,11 @@ def main(argv=None) -> int:
         changed = cmd.state != last_state[0]
         last_state[0] = cmd.state
         if changed or not args.quiet:
+            pan = f" pan={cmd.pan:5.1f}" if cmd.pan is not None else ""
+            strafe = f" str={cmd.strafe:+5.1f}" if cmd.strafe else ""
             print(f"  f{frame_n[0]:04d} {cmd.state:9s} "
                   f"err={cmd.heading_error:+.2f} fwd={cmd.forward:5.1f} "
-                  f"turn={cmd.turn:+6.1f} us={cmd.distance_mm:5d}mm "
+                  f"turn={cmd.turn:+6.1f}{strafe}{pan} us={cmd.distance_mm:5d}mm "
                   f"det={detector.last_inference_ms:5.1f}ms"
                   f"{'  <-- ' + cmd.note if cmd.note else ''}")
 

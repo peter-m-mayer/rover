@@ -11,11 +11,13 @@ import pytest
 from catchaser.chase import (
     ChaseController, DriveCommand,
     STATE_TRACKING, STATE_HOLD, STATE_SEARCHING, STATE_LOST, STATE_IDLE,
+    STATE_DART, STATE_FREEZE, STATE_FLEE,
 )
 from catchaser.detector import Detection, COCO_CAT
 from raspbot_slam import config
 
 W = config.CAMERA_WIDTH
+PAN_CENTER = config.SERVO_PAN_CENTER
 
 
 # --------------------------------------------------------------------------- #
@@ -28,6 +30,7 @@ class RecordingActuators:
     def __init__(self):
         self.commands = []      # list of (forward, turn, strafe)
         self.leds = []
+        self.pans = []
         self.stopped = 0
 
     def drive(self, forward, turn=0.0, strafe=0.0):
@@ -39,6 +42,9 @@ class RecordingActuators:
 
     def set_led_color(self, name):
         self.leds.append(name)
+
+    def set_servo_pan(self, angle):
+        self.pans.append(angle)
 
 
 class FakeSensors:
@@ -304,6 +310,88 @@ def _fake_clock():
 # drive() mecanum mixing on the real actuator wrapper (mock bot)
 # --------------------------------------------------------------------------- #
 
+class TestPanTracking:
+    def _pan_ctrl(self, **kw):
+        return ChaseController(RecordingActuators(), FakeSensors(),
+                               use_pan=True, pan_sign=1, **kw)
+
+    def test_pan_moves_toward_cat_and_recenters_error(self):
+        # Sim convention (sign +1): cat on the right (err>0) -> pan decreases
+        # (camera looks right). Cat on the left -> pan increases.
+        c = self._pan_ctrl()
+        right = c.compute([cat_at(W * 0.85)], distance_mm=2000)
+        assert right.pan is not None and right.pan < PAN_CENTER
+        c2 = self._pan_ctrl()
+        left = c2.compute([cat_at(W * 0.15)], distance_mm=2000)
+        assert left.pan > PAN_CENTER
+
+    def test_body_follows_pan_direction(self):
+        # Camera panned right (pan<90) -> body turns right (turn>0) to follow.
+        c = self._pan_ctrl()
+        for _ in range(6):
+            cmd = c.compute([cat_at(W * 0.9)], distance_mm=2000)
+        assert cmd.pan < PAN_CENTER
+        assert cmd.turn > 0
+
+    def test_pan_sign_flip_reverses_direction(self):
+        c = ChaseController(RecordingActuators(), FakeSensors(),
+                            use_pan=True, pan_sign=-1)
+        right = c.compute([cat_at(W * 0.85)], distance_mm=2000)
+        assert right.pan > PAN_CENTER          # flipped vs sign=+1
+
+    def test_pan_recenters_when_lost(self):
+        c = self._pan_ctrl()
+        for _ in range(6):
+            c.compute([cat_at(W * 0.95)], distance_mm=2000)   # pan swings out
+        off = c._pan
+        for _ in range(20):
+            lost = c.compute([], distance_mm=1000)             # cat gone
+        assert abs(lost.pan - PAN_CENTER) < abs(off - PAN_CENTER)  # drifted back
+
+    def test_apply_sets_servo_pan(self):
+        acts = RecordingActuators()
+        c = ChaseController(acts, FakeSensors(), use_pan=True)
+        c.apply(c.compute([cat_at(W * 0.8)], distance_mm=2000))
+        assert acts.pans and acts.pans[-1] != PAN_CENTER
+
+
+class TestPreyMode:
+    def _prey(self, **kw):
+        return ChaseController(RecordingActuators(), FakeSensors(),
+                               mode="prey", **kw)
+
+    def test_dart_then_freeze_cycle(self):
+        c = self._prey(prey_dart_frames=2, prey_freeze_frames=3)
+        seq = [c.compute([cat_at(W / 2)], distance_mm=2000).state for _ in range(10)]
+        assert seq == [STATE_DART, STATE_DART, STATE_FREEZE, STATE_FREEZE,
+                       STATE_FREEZE] * 2
+
+    def test_freeze_is_fully_still(self):
+        c = self._prey(prey_dart_frames=1, prey_freeze_frames=1)
+        c.compute([cat_at(W / 2)], distance_mm=2000)              # dart
+        freeze = c.compute([cat_at(W / 2)], distance_mm=2000)     # freeze
+        assert freeze.state == STATE_FREEZE
+        assert (freeze.forward, freeze.turn, freeze.strafe) == (0.0, 0.0, 0.0)
+
+    def test_darts_zigzag_alternate_direction(self):
+        c = self._prey(prey_dart_frames=1, prey_freeze_frames=0)
+        s1 = c.compute([cat_at(W / 2)], distance_mm=2000).strafe
+        s2 = c.compute([cat_at(W / 2)], distance_mm=2000).strafe
+        assert s1 != 0 and s2 != 0 and (s1 > 0) != (s2 > 0)   # opposite signs
+
+    def test_flees_when_cat_is_close(self):
+        c = self._prey()
+        cmd = c.compute([cat_at(W / 2)], distance_mm=config.CHASE_PREY_FLEE_MM - 50)
+        assert cmd.state == STATE_FLEE
+        assert cmd.forward < 0                                 # backing away
+
+    def test_prey_still_tracks_heading(self):
+        # Even while darting, it steers toward an off-center cat.
+        c = self._prey()
+        cmd = c.compute([cat_at(W * 0.8)], distance_mm=2000)
+        assert cmd.turn > 0                                    # centering the cat
+
+
 class TestMecanumDrive:
     def _bot(self):
         class Bot:
@@ -358,3 +446,18 @@ class TestChaseSim:
         assert r["acquired"]                 # then locked on
         assert r["reached"]
         assert r["no_collision"]
+
+    def test_pan_tracking_tightens_centering(self):
+        # Closed-loop in PyBullet: camera pan tracking should hold the cat
+        # closer to frame-center than body-only steering.
+        from catchaser.chase_sim import run_chase_sim
+        body = run_chase_sim("approach", max_frames=400, use_pan=False)
+        pan = run_chase_sim("approach", max_frames=400, use_pan=True)
+        assert pan["reached"] and pan["no_collision"]
+        assert pan["mean_abs_err"] < body["mean_abs_err"]
+
+    def test_prey_mode_darts_freezes_flees(self):
+        from catchaser.chase_sim import run_chase_sim
+        r = run_chase_sim("approach", max_frames=400, mode="prey", use_pan=True)
+        assert r["acquired"] and r["froze"] and r["darted"]
+        assert r["no_collision"]             # flees before ramming the cat
