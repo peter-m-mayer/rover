@@ -98,6 +98,18 @@ class SimActuators:
         r2 = vy + vx
         self._set_motors(int(l1), int(l2), int(r1), int(r2))
 
+    def drive(self, forward: float, turn: float = 0.0, strafe: float = 0.0):
+        """Mecanum drive: combine forward, in-place turn, and lateral strafe.
+
+        Matches actuators.Actuators.drive(). + turn = clockwise/right,
+        + strafe = right.
+        """
+        l1 = forward + strafe + turn
+        l2 = forward - strafe + turn
+        r1 = forward - strafe - turn
+        r2 = forward + strafe - turn
+        self._set_motors(l1, l2, r1, r2)
+
     def stop(self):
         self._set_motors(0, 0, 0, 0)
 

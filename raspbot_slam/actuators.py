@@ -128,6 +128,23 @@ class Actuators:
         r2 = vy + vx
         self._set_motors(int(l1), int(l2), int(r1), int(r2))
 
+    def drive(self, forward: float, turn: float = 0.0, strafe: float = 0.0):
+        """Mecanum drive: combine forward, in-place turn, and lateral strafe.
+
+        Args:
+            forward: Forward speed (+) / backward (-).
+            turn: Rotation command. + = clockwise / turn right, - = left.
+            strafe: Lateral speed. + = strafe right, - = strafe left.
+
+        Component magnitudes add on the wheels, so |forward|+|turn|+|strafe|
+        may exceed MOTOR_SPEED_MAX; _set_motors clamps each wheel.
+        """
+        l1 = forward + strafe + turn
+        l2 = forward - strafe + turn
+        r1 = forward - strafe - turn
+        r2 = forward + strafe - turn
+        self._set_motors(l1, l2, r1, r2)
+
     def stop(self):
         """Stop all motors immediately."""
         self._set_motors(0, 0, 0, 0)
@@ -153,20 +170,24 @@ class Actuators:
     # LED Status Indication
     # =========================================================================
 
-    # WS2812B color presets matching Raspbot_Lib conventions
-    _LED_COLORS = {
-        "off":     (0, 0, 0),
-        "red":     (255, 0, 0),
-        "green":   (0, 255, 0),
-        "blue":    (0, 0, 255),
-        "yellow":  (255, 255, 0),
-        "purple":  (128, 0, 128),
-        "cyan":    (0, 255, 255),
-        "white":   (255, 255, 255),
-        "mapping": (0, 0, 128),      # dim blue
-        "localizing": (0, 128, 0),   # dim green
-        "lost":    (128, 0, 0),      # dim red
-        "scanning": (128, 128, 0),   # dim yellow
+    # WS2812B preset color *indices*. The vendor firmware exposes a fixed
+    # palette via Ctrl_WQ2812_ALL(state, color) where `color` is an index
+    # (NOT an RGB triplet). Indices 0-3 verified against the vendor
+    # color_detection.py demo; 4-6 follow the standard Yahboom ordering.
+    _LED_INDEX = {
+        "red": 0, "green": 1, "blue": 2, "yellow": 3,
+        "purple": 4, "cyan": 5, "white": 6,
+        # SLAM status aliases -> nearest preset
+        "mapping": 2,      # blue
+        "localizing": 1,   # green
+        "lost": 0,         # red
+        "scanning": 3,     # yellow
+    }
+
+    # RGB of each preset, for snapping a requested RGB to the nearest index.
+    _INDEX_RGB = {
+        0: (255, 0, 0), 1: (0, 255, 0), 2: (0, 0, 255), 3: (255, 255, 0),
+        4: (128, 0, 128), 5: (0, 255, 255), 6: (255, 255, 255),
     }
 
     def set_led_color(self, color_name: str):
@@ -174,29 +195,50 @@ class Actuators:
 
         Args:
             color_name: One of 'off', 'red', 'green', 'blue', 'yellow',
-                        'mapping', 'localizing', 'lost', 'scanning', etc.
+                        'purple', 'cyan', 'white', or a SLAM status alias
+                        ('mapping', 'localizing', 'lost', 'scanning').
         """
-        r, g, b = self._LED_COLORS.get(color_name, (0, 0, 0))
-        self.set_led_rgb(r, g, b)
+        if self._bot is None:
+            return
+        if not color_name or color_name == "off":
+            self._bot.Ctrl_WQ2812_ALL(0, 0)   # state 0 = off
+            return
+        idx = self._LED_INDEX.get(color_name)
+        if idx is None:
+            self._bot.Ctrl_WQ2812_ALL(0, 0)
+            return
+        self._bot.Ctrl_WQ2812_ALL(1, idx)     # state 1 = on, at palette index
 
     def set_led_rgb(self, r: int, g: int, b: int, led_id: int = 0):
-        """Set LED color directly.
+        """Approximate an RGB color with the nearest hardware preset.
+
+        The MCU palette is index-based (no free RGB), so we snap to the
+        closest preset by Euclidean distance.
 
         Args:
-            r, g, b: Color values 0-255.
+            r, g, b: Desired color 0-255.
             led_id: 0 = all LEDs, 1-14 = individual LED.
         """
-        if self._bot is not None:
-            self._bot.Ctrl_WS2812B(led_id, r, g, b)
+        if self._bot is None:
+            return
+        if (r, g, b) == (0, 0, 0):
+            if led_id == 0:
+                self._bot.Ctrl_WQ2812_ALL(0, 0)
+            else:
+                self._bot.Ctrl_WQ2812_Alone(led_id, 0, 0)
+            return
+        idx = min(self._INDEX_RGB, key=lambda i: sum(
+            (a - c) ** 2 for a, c in zip(self._INDEX_RGB[i], (r, g, b))))
+        if led_id == 0:
+            self._bot.Ctrl_WQ2812_ALL(1, idx)
+        else:
+            self._bot.Ctrl_WQ2812_Alone(led_id, 1, idx)
 
     def set_led_brightness(self, brightness: int):
-        """Set LED brightness.
-
-        Args:
-            brightness: 0-255.
-        """
+        """Set LED brightness 0-255 across all channels (best effort)."""
         if self._bot is not None:
-            self._bot.Ctrl_WS2812B_Brig(brightness)
+            b = max(0, min(255, int(brightness)))
+            self._bot.Ctrl_WQ2812_brightness_ALL(b, b, b)
 
     # =========================================================================
     # Buzzer
@@ -205,12 +247,12 @@ class Actuators:
     def buzzer_on(self):
         """Turn buzzer on."""
         if self._bot is not None:
-            self._bot.Ctrl_Buzzer(1)
+            self._bot.Ctrl_BEEP_Switch(1)
 
     def buzzer_off(self):
         """Turn buzzer off."""
         if self._bot is not None:
-            self._bot.Ctrl_Buzzer(0)
+            self._bot.Ctrl_BEEP_Switch(0)
 
     def beep(self, duration_s: float = 0.1):
         """Short beep for feedback."""

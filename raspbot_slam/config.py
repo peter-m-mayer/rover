@@ -84,6 +84,26 @@ CROSSTRACK_PID_I = 0.0
 CROSSTRACK_PID_D = 0.002
 
 # =============================================================================
+# Cat Chaser (catchaser package)
+# =============================================================================
+# Heading PID: input is normalized horizontal error of the cat centroid,
+# err = (cx - W/2) / (W/2) in [-1, 1] (+ = cat to the right of frame center).
+# Output is a mecanum turn command in motor units (+ = rotate clockwise/right).
+CHASE_HEADING_KP = 80.0            # motor units per unit normalized error
+CHASE_HEADING_KI = 0.0             # off by default (avoids windup while searching)
+CHASE_HEADING_KD = 6.0             # damps overshoot on fast centroid swings
+CHASE_FORWARD_SPEED = NAV_SPEED    # base approach speed when cat is centered
+CHASE_MAX_SPEED = 120              # cap on any single wheel magnitude (of 255)
+CHASE_TURN_MAX = 90                # clamp on the turn command
+CHASE_STOP_MM = OBSTACLE_STOP_MM   # ultrasonic stop distance (200 mm) — don't maul the cat
+CHASE_SEARCH_SPIN_SPEED = 50       # in-place spin speed while hunting for a lost cat
+CHASE_LOST_GRACE_FRAMES = 3        # hold position this many lost frames before search-spin
+CHASE_CENTER_DEADBAND = 0.06       # |err| below this counts as centered (no turn)
+CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forward drive
+CHASE_MIN_CONFIDENCE = 0.35        # ignore detections below this confidence
+CHASE_LOOP_HZ = 10                 # target control loop rate
+
+# =============================================================================
 # Camera
 # =============================================================================
 CAMERA_DEVICE = 0
