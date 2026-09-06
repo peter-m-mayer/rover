@@ -113,13 +113,26 @@ second pet ever requires discrimination — recognition itself is solid):
 4. **Train** elsewhere (ultralytics on a PC), export ONNX 320 px opset 12,
    drop into `catchaser/models/`.
 
-**Triage results so far (2 sessions, 244 frames, 2026-09-07):** 198 detector
-cat-claims → 197 confirmed, 1 box-fix, **0 false positives (99.5% precision)**;
-198 positives / 46 negatives. ~40% of a ~500-positive fine-tune target.
-Recognition is not the bottleneck — don't fine-tune yet; these sessions are
-the eval set a future model must beat. NB: an earlier "93% precision" figure
-was wrong (it counted `nocat` clicks on already-empty frames as detector
-errors); `dataset_stats` computes it correctly against the original label.
+**Confusion matrix (2 reviewed sessions, 244 frames, 2026-09-07):**
+TP 198 · FP 0 · FN 23 · TN 23 → **precision 100%, recall 89.6%, F1 94.5%**.
+Run `python3 -m catchaser.dataset_stats` for the live matrix. The detector
+never false-alarms (0 FP, thanks to the 0.50 threshold) but misses ~10% — all
+hard cases (motion blur, extreme close-ups, dark cat under furniture,
+legs-only crops). Recognition is not the bottleneck; don't fine-tune yet.
+
+⚠️ **Two findings from the matrix work (act before any fine-tune):**
+1. **23 missed cats are mislabeled as negatives.** The reviewer pressed "good"
+   on no-box frames meaning "yes, cat" — but `review.py`'s "good" *keeps the
+   empty label*, so those frames are stored as negatives (a cat labeled as
+   background = training poison). Verified by eye: every "good"-on-empty frame
+   contains the cat. They must be re-boxed (→ positives) before training;
+   they're the highest-value hard examples.
+2. **Review-tool trap:** "good" is ambiguous on a no-box frame. `review.py`
+   should either hide "good" when there's no detector box, or add an explicit
+   "Missed" action that routes to `review_fix/` as a to-be-boxed positive.
+   Until fixed, `dataset_stats` interprets good/fix-on-empty as a missed cat
+   (FN). Earlier figures ("93%", then "99.5%") predate identifying the FN
+   quadrant.
 
 Ideas not yet implemented, in rough value order:
 1. **Pan-servo search**: sweep the camera (0-180°) with the chassis parked —

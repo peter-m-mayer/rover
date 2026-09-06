@@ -384,13 +384,61 @@ def build(images_dir, out_path, video_path=None, poster_path=None):
         ("u = Undo    lossless, resume anytime", CYAN),
     ], Inches(0.7), Inches(1.9), Inches(6.0), Inches(3.4), size=12)
     stat(s, Inches(7.3), Inches(2.0), "244", "frames triaged · 2 sessions")
-    stat(s, Inches(9.9), Inches(2.0), "99.5%", "detector precision")
-    stat(s, Inches(7.3), Inches(3.3), "198/46", "positives / negatives")
-    stat(s, Inches(9.9), Inches(3.3), "0 FP", "false positives · 1 box-fix", color=CYAN)
+    stat(s, Inches(9.9), Inches(2.0), "100%", "precision · 0 FP")
+    stat(s, Inches(7.3), Inches(3.3), "90%", "recall · 23 misses", color=AMBER)
+    stat(s, Inches(9.9), Inches(3.3), "94.5%", "F1 score", color=CYAN)
     tf = text_box(s, Inches(7.3), Inches(4.6), Inches(5.3), Inches(2))
-    para(tf, "Of 198 detector cat-claims: 197 confirmed, 1 box-fix, zero false positives. "
-             "Fine-tuning waits for ~500 varied positives (40% there); these sessions become "
-             "the eval set any future model must beat.", size=12, color=TEXT_DIM, first=True)
+    para(tf, "Triaging by thumb also measures the detector — every tap is a confusion-matrix "
+             "cell (next slide). It surfaced 23 missed cats hiding as negatives. Fine-tuning "
+             "waits for ~500 varied positives; these become the eval set to beat.", size=12,
+         color=TEXT_DIM, first=True)
+
+    # ---- 11b · confusion matrix --------------------------------------------
+    s = add_slide(prs)
+    kicker(s, "// 10b · evaluation · confusion matrix · 244 reviewed frames")
+    title(s, "Precision 100% · Recall 90%")
+    # 3x3 table: corner + 2 actual-headers, 2 predicted-rows.
+    from pptx.util import Cm
+    rows, cols = 3, 3
+    tbl_w, tbl_h = Inches(6.0), Inches(3.4)
+    gt = s.shapes.add_table(rows, cols, Inches(0.7), Inches(1.9), tbl_w, tbl_h).table
+    cells = [
+        ["", "actual: CAT", "actual: NO CAT"],
+        ["pred: CAT", "TP  198", "FP  0"],
+        ["pred: NO CAT", "FN  23", "TN  23"],
+    ]
+    cell_colors = {
+        (1, 1): GREEN, (1, 2): TEXT_DIM, (2, 1): AMBER, (2, 2): GREEN_DIM,
+    }
+    for r in range(rows):
+        for c in range(cols):
+            cell = gt.cell(r, c)
+            cell.fill.solid(); cell.fill.fore_color.rgb = PANEL
+            cell.margin_top = Emu(30000); cell.margin_bottom = Emu(30000)
+            tframe = cell.text_frame
+            p = tframe.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
+            run = p.add_run(); run.text = cells[r][c]
+            run.font.name = MONO_FONT
+            is_data = r >= 1 and c >= 1
+            run.font.size = Pt(18 if is_data else 11)
+            run.font.bold = is_data
+            run.font.color.rgb = cell_colors.get((r, c), GREEN_DIM if not is_data else TEXT)
+    # metrics + caveat panel on the right
+    code_panel(s, [
+        ("METRICS", GREEN_DIM),
+        ("", TEXT),
+        ("precision   198/198  =  100.0%", GREEN),
+        ("recall      198/221  =   89.6%", AMBER),
+        ("F1                   =   94.5%", TEXT),
+        ("accuracy    221/244  =   90.6%", TEXT),
+        ("", TEXT),
+        ("0 false positives — the 0.50 threshold", TEXT_DIM),
+        ("earns its keep. ~10% misses, all hard:", TEXT_DIM),
+        ("blur, close-ups, dark-under-furniture.", TEXT_DIM),
+        ("", TEXT),
+        ("finding: the 23 misses were mislabeled", AMBER),
+        ("as negatives — re-box before fine-tune.", AMBER),
+    ], Inches(7.0), Inches(1.9), Inches(5.7), Inches(3.6), size=12)
 
     # ---- 12 · roadmap -------------------------------------------------------
     s = add_slide(prs)

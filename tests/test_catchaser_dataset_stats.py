@@ -24,22 +24,23 @@ BOX = "0 0.5 0.5 0.3 0.3\n"
 
 
 class TestSessionStats:
-    def test_precision_counts_only_detector_claims(self, tmp_path):
+    def test_confusion_matrix_cells(self, tmp_path):
         ds = str(tmp_path / "s")
         make_dataset(ds, [
-            ("a", BOX, "good", BOX),    # TP
-            ("b", BOX, "good", BOX),    # TP
-            ("c", BOX, "nocat", ""),    # FP: detector claimed, human rejected
-            ("d", BOX, "fix", BOX),     # fix
-            ("e", "", "nocat", ""),     # empty orig -> NOT a detector claim
+            ("a", BOX, "good", BOX),    # boxed, confirmed  -> TP
+            ("b", BOX, "good", BOX),    # boxed, confirmed  -> TP
+            ("c", BOX, "nocat", ""),    # boxed, no cat     -> FP
+            ("d", BOX, "fix", BOX),     # boxed, bad box    -> TP (fix)
+            ("e", "", "nocat", ""),     # no box, no cat    -> TN
+            ("f", "", "good", ""),      # no box, cat there -> FN (missed)
+            ("g", "", "fix", ""),       # no box, cat there -> FN (missed)
         ])
         s = session_stats(ds)
-        assert s.frames == 5
-        assert s.claimed == 4          # 'e' excluded — detector claimed nothing
-        assert s.true_pos == 2
-        assert s.false_pos == 1
-        assert s.fix == 1
-        assert s.precision == 0.5      # 2 / 4
+        assert s.frames == 7
+        assert s.claimed == 4
+        assert (s.cm_tp, s.cm_fp, s.cm_fn, s.cm_tn) == (3, 1, 2, 1)
+        assert s.precision == 0.75     # 3 / (3+1)
+        assert s.recall == 0.6         # 3 / (3+2)
 
     def test_positive_negative_composition(self, tmp_path):
         ds = str(tmp_path / "s")
@@ -71,15 +72,27 @@ class TestCombine:
         make_dataset(d2, [("c", BOX, "good", BOX), ("d", BOX, "good", BOX)])
         total = combine([session_stats(d1), session_stats(d2)])
         assert total.claimed == 4
-        assert total.true_pos == 3
+        assert total.cm_tp == 3
         assert total.precision == 0.75
+
+    def test_recall_combines_false_negatives(self, tmp_path):
+        d1 = str(tmp_path / "s1")
+        d2 = str(tmp_path / "s2")
+        make_dataset(d1, [("a", BOX, "good", BOX), ("b", "", "good", "")])   # 1 TP, 1 FN
+        make_dataset(d2, [("c", BOX, "good", BOX), ("d", "", "nocat", "")])  # 1 TP, 1 TN
+        total = combine([session_stats(d1), session_stats(d2)])
+        assert (total.cm_tp, total.cm_fn, total.cm_tn) == (2, 1, 1)
+        assert total.recall == 2 / 3
 
 
 class TestReport:
-    def test_report_has_combined_and_progress(self, tmp_path):
+    def test_report_has_matrix_and_progress(self, tmp_path):
         ds = str(tmp_path / "s")
-        make_dataset(ds, [("a", BOX, "good", BOX)])
+        make_dataset(ds, [("a", BOX, "good", BOX), ("b", "", "good", "")])
         out = format_report([session_stats(ds)], target_positives=500)
         assert "COMBINED" in out
-        assert "100.0%" in out
+        assert "confusion matrix" in out
+        assert "TP = 1" in out and "FN = 1" in out
+        assert "precision = 100.0%" in out
+        assert "recall =  50.0%" in out
         assert "1 positives of ~500 target" in out

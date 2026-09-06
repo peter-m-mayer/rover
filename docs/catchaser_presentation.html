@@ -118,6 +118,25 @@ table.spec td .d{color:var(--text-dim)}
 @keyframes pulse{50%{opacity:.45}}
 .state-card p{font-size:.78rem;color:var(--text-dim);line-height:1.6}
 
+/* confusion matrix */
+.cm{display:grid;grid-template-columns:auto 130px 130px;grid-template-rows:auto 108px 108px;gap:6px}
+.cm-corner{}
+.cm-head{display:flex;align-items:center;justify-content:center;text-align:center;font-size:.66rem;
+  letter-spacing:.16em;color:var(--green-dim);text-transform:uppercase;line-height:1.35;padding:.3rem}
+.cm-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border:1px solid var(--line);background:var(--panel)}
+.cm-cell b{font-family:'Chakra Petch',sans-serif;font-size:2.3rem;line-height:1}
+.cm-cell span{font-size:.58rem;letter-spacing:.2em;text-transform:uppercase;color:var(--text-dim);margin-top:.35rem}
+.cm-cell.tp{border-color:var(--green)} .cm-cell.tp b{color:var(--green)}
+.cm-cell.tn{border-color:var(--green-dark)} .cm-cell.tn b{color:var(--green-dim)}
+.cm-cell.fp{border-color:var(--line)} .cm-cell.fp b{color:var(--text-dim)}
+.cm-cell.fn{border-color:var(--amber)} .cm-cell.fn b{color:var(--amber)}
+.metric-row{display:flex;gap:2.2rem;flex-wrap:wrap;margin-bottom:1.2rem}
+.metric b{font-family:'Chakra Petch',sans-serif;font-size:2.4rem;color:var(--green);line-height:1;display:block}
+.metric.warn b{color:var(--amber)}
+.metric span{font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:var(--text-dim)}
+.metric small{font-size:.9rem;color:var(--text-dim);font-family:'IBM Plex Mono',monospace}
+
 /* chrome */
 .hudbar{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:center;
   padding:.8rem 2rem;font-size:.7rem;letter-spacing:.15em;color:var(--text-dim);z-index:60;
@@ -221,7 +240,7 @@ table.spec td .d{color:var(--text-dim)}
         <li><b>Export:</b> <span class="d">yolov8n.pt → ONNX · 320 px input · opset 12 · simplified · 12.1 MB · ~3.2M params</span></li>
         <li><b>Runtime:</b> <span class="d">pure onnxruntime + OpenCV on the robot — no ultralytics, no torch. Letterbox → NCHW → NMS in ~150 lines.</span></li>
         <li><b>Threshold:</b> <span class="d">conf ≥ 0.50, calibrated from field data (real cat ≥ 0.53 always; false positives 0.41–0.45).</span></li>
-        <li><b>Fine-tune?</b> <span class="d">Not yet — 99.5% precision over 244 triaged field frames (0 false positives). Dataset pipeline stands ready if a second pet ever needs discriminating.</span></li>
+        <li><b>Fine-tune?</b> <span class="d">Not yet — 100% precision / 90% recall over 244 triaged field frames (see the confusion matrix). The misses are the fine-tune fuel when we get there.</span></li>
       </ul>
     </div>
     <div>
@@ -438,13 +457,48 @@ $ <span class="w">./review.sh</span>           <span class="dim"># triage server
     <div>
       <div class="stat-row">
         <div><div class="big-num">244</div><div class="stat-label">frames triaged · 2 sessions</div></div>
-        <div><div class="big-num">99.5<small>%</small></div><div class="stat-label">detector precision</div></div>
-        <div><div class="big-num">198<small>/46</small></div><div class="stat-label">positives / negatives</div></div>
+        <div><div class="big-num">100<small>%</small></div><div class="stat-label">precision · 0 FP</div></div>
+        <div><div class="big-num">90<small>%</small></div><div class="stat-label">recall · 23 misses</div></div>
       </div>
-      <p class="lede">Of 198 frames where the detector claimed a cat: <b style="color:#eaffe6">197
-      confirmed</b>, 1 box-fix, <b style="color:var(--green)">zero false positives</b>. (The
-      blooper reel was early runs before the 0.50 threshold.) Fine-tuning waits for ~500 varied
-      positives — 40% there; these sessions become the <i>eval set</i> any future model must beat.</p>
+      <p class="lede">Triaging by thumb also <i>measures</i> the detector — every g/n/f tap is a
+      confusion-matrix cell (next slide). It surfaced 23 missed cats hiding as "negatives"; the
+      pipeline now flags them. Fine-tuning waits for ~500 varied positives — these sessions become
+      the <i>eval set</i> any future model must beat.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 11b · CONFUSION MATRIX -->
+<section class="slide" data-state="EVAL" data-color="#6cff5c">
+  <div class="kicker">// 10b · evaluation · <b>confusion matrix</b> · 244 reviewed frames</div>
+  <h2>Precision <span class="accent">100%</span> · Recall <span class="accent">90%</span></h2>
+  <div style="display:flex;gap:3.5rem;align-items:center;flex-wrap:wrap">
+    <div class="cm">
+      <div class="cm-corner"></div>
+      <div class="cm-head">actual<br>CAT</div>
+      <div class="cm-head">actual<br>NO CAT</div>
+      <div class="cm-head">predicted<br>CAT</div>
+      <div class="cm-cell tp"><b>198</b><span>true pos</span></div>
+      <div class="cm-cell fp"><b>0</b><span>false pos</span></div>
+      <div class="cm-head">predicted<br>NO CAT</div>
+      <div class="cm-cell fn"><b>23</b><span>false neg</span></div>
+      <div class="cm-cell tn"><b>23</b><span>true neg</span></div>
+    </div>
+    <div style="flex:1;min-width:280px">
+      <div class="metric-row">
+        <div class="metric"><b>100%</b><span>precision · 198/198</span></div>
+        <div class="metric warn"><b>89.6%</b><span>recall · 198/221</span></div>
+        <div class="metric"><b>94.5%</b><span>F1 score</span></div>
+      </div>
+      <p class="lede"><b style="color:var(--green)">Never cries cat falsely</b> (0 false
+      positives) — the 0.50 threshold earns its keep. It <b style="color:var(--amber)">misses
+      ~10%</b>, and the misses are all hard: motion blur, extreme close-ups, a dark cat under
+      furniture, legs-only crops.</p>
+      <p class="lede" style="margin-top:.8rem;font-size:.82rem">Ground truth from human triage
+      of every frame. <b style="color:#eaffe6">Caveat:</b> negatives were sampled from
+      detector-cleared frames, so recall is a strong estimate, not a held-out benchmark. Bonus
+      finding: those 23 misses were silently mislabeled as negatives (a review-tool trap) — they
+      must be re-boxed before any fine-tune, where they'd be the most valuable hard examples.</p>
     </div>
   </div>
 </section>

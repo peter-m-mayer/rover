@@ -29,15 +29,42 @@ class SessionStats:
     name: str
     frames: int = 0
     claimed: int = 0        # detector produced a box (non-empty orig label)
-    true_pos: int = 0       # confirmed Good
-    false_pos: int = 0      # corrected to No-cat
-    fix: int = 0            # cat present, box wrong
+    true_pos: int = 0       # detector boxed, confirmed Good
+    false_pos: int = 0      # detector boxed, corrected to No-cat
+    fix: int = 0            # detector boxed, cat present but box wrong
+    true_neg: int = 0       # detector empty, confirmed no cat
+    false_neg: int = 0      # detector empty, but a cat was there (missed)
     positives: int = 0      # non-empty final labels
     negatives: int = 0      # empty final labels
 
+    # --- confusion-matrix view (classification: "is a cat present?") ---------
+    # A box-fix is a correctly-classified cat with a bad box, so it counts as a
+    # true positive here; the imperfect box is a separate localization concern.
+    @property
+    def cm_tp(self) -> int:
+        return self.true_pos + self.fix
+
+    @property
+    def cm_fp(self) -> int:
+        return self.false_pos
+
+    @property
+    def cm_fn(self) -> int:
+        return self.false_neg
+
+    @property
+    def cm_tn(self) -> int:
+        return self.true_neg
+
     @property
     def precision(self) -> float:
-        return self.true_pos / self.claimed if self.claimed else 0.0
+        d = self.cm_tp + self.cm_fp
+        return self.cm_tp / d if d else 0.0
+
+    @property
+    def recall(self) -> float:
+        d = self.cm_tp + self.cm_fn
+        return self.cm_tp / d if d else 0.0
 
 
 def _count_positive_labels(label_dir: str) -> int:
@@ -62,6 +89,7 @@ def session_stats(dataset: str) -> SessionStats:
             decision = v.get("decision")
             claimed = bool((v.get("orig") or "").strip())
             if claimed:
+                # Detector drew a box.
                 s.claimed += 1
                 if decision == "good":
                     s.true_pos += 1
@@ -69,6 +97,16 @@ def session_stats(dataset: str) -> SessionStats:
                     s.false_pos += 1
                 elif decision == "fix":
                     s.fix += 1
+            else:
+                # Detector drew NO box. 'nocat' confirms it was empty (TN);
+                # 'good' or 'fix' mean the reviewer affirmed a cat IS present —
+                # i.e. the detector missed it (FN). Verified 2026-09-07 by eye:
+                # every 'good'-on-empty frame contained the cat.
+                # (This overloads 'good'; see review-tool note in CLAUDE.md.)
+                if decision == "nocat":
+                    s.true_neg += 1
+                elif decision in ("good", "fix"):
+                    s.false_neg += 1
 
     s.positives = _count_positive_labels(os.path.join(dataset, "labels"))
     s.negatives = s.frames - s.positives
@@ -83,9 +121,36 @@ def combine(sessions: List[SessionStats], name: str = "COMBINED") -> SessionStat
         t.true_pos += s.true_pos
         t.false_pos += s.false_pos
         t.fix += s.fix
+        t.true_neg += s.true_neg
+        t.false_neg += s.false_neg
         t.positives += s.positives
         t.negatives += s.negatives
     return t
+
+
+def format_matrix(total: SessionStats) -> str:
+    """Render the classic 2x2 confusion matrix + precision/recall/F1."""
+    tp, fp, fn, tn = total.cm_tp, total.cm_fp, total.cm_fn, total.cm_tn
+    p, r = total.precision, total.recall
+    f1 = 2 * p * r / (p + r) if (p + r) else 0.0
+    acc = (tp + tn) / (tp + fp + fn + tn) if (tp + fp + fn + tn) else 0.0
+    lines = [
+        "",
+        "confusion matrix (positive = cat present):",
+        "                     actual: CAT    actual: NO CAT",
+        f"  predicted: CAT     TP = {tp:<8d}   FP = {fp:d}",
+        f"  predicted: NO CAT  FN = {fn:<8d}   TN = {tn:d}",
+        "",
+        f"  precision = {p*100:5.1f}%   recall = {r*100:5.1f}%   "
+        f"F1 = {f1*100:5.1f}%   accuracy = {acc*100:5.1f}%",
+    ]
+    if total.fix:
+        lines.append(f"  note: {total.fix} detection(s) had an imperfect box "
+                     f"(localization, counted TP here).")
+    if total.false_neg:
+        lines.append("  note: misses (FN) are currently MISLABELED as negatives "
+                     "in labels/ — re-box before fine-tuning.")
+    return "\n".join(lines)
 
 
 _ROW = "%-18s %6s %8s %5s %5s %5s %7s %5s %5s"
@@ -104,6 +169,7 @@ def format_report(sessions: List[SessionStats], target_positives: int = 500) -> 
                          total.false_pos, total.fix,
                          f"{total.precision*100:.1f}%", total.positives,
                          total.negatives))
+    lines.append(format_matrix(total))
     pct = total.positives / target_positives * 100 if target_positives else 0
     lines.append("")
     lines.append(f"training progress: {total.positives} positives of "
