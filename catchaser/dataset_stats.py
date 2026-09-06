@@ -99,13 +99,13 @@ def session_stats(dataset: str) -> SessionStats:
                     s.fix += 1
             else:
                 # Detector drew NO box. 'nocat' confirms it was empty (TN);
-                # 'good' or 'fix' mean the reviewer affirmed a cat IS present —
-                # i.e. the detector missed it (FN). Verified 2026-09-07 by eye:
-                # every 'good'-on-empty frame contained the cat.
-                # (This overloads 'good'; see review-tool note in CLAUDE.md.)
+                # 'missed' is the explicit false-negative action. 'good'/'fix'
+                # on a no-box frame are the OLD trap (pre-fix data) where the
+                # reviewer affirmed a cat but the empty label was kept — also
+                # a missed cat (verified 2026-09-07 by eye). All count as FN.
                 if decision == "nocat":
                     s.true_neg += 1
-                elif decision in ("good", "fix"):
+                elif decision in ("missed", "good", "fix"):
                     s.false_neg += 1
 
     s.positives = _count_positive_labels(os.path.join(dataset, "labels"))

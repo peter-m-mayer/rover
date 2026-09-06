@@ -293,7 +293,13 @@ class ChaseController:
                     on_step(cmd)
 
                 frame += 1
-                sleep(period)
+                # Sleep only the *remainder* of the period. Perception already
+                # costs ~50-70 ms on the Pi; sleeping a full period on top of
+                # that throttled the loop to ~6 Hz (half the detector's rate)
+                # and added tracking latency. Now the detector is the limiter.
+                remaining = period - (now() - t)
+                if remaining > 0:
+                    sleep(remaining)
         finally:
             self._safe_stop()
         return last

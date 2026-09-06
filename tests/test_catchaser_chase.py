@@ -264,6 +264,24 @@ class TestRunLoop:
         assert acts.stopped >= 1
         assert acts.commands[-1] == (0.0, 0.0, 0.0)   # ends stopped
 
+    def test_loop_does_not_oversleep_when_work_exceeds_period(self):
+        # If perception already burns > period, the loop must not add sleep.
+        c = make_controller()
+        slept = []
+        clock = [0.0]
+
+        def now():
+            return clock[0]
+
+        def slow_perceive():
+            clock[0] += 0.20      # 200 ms of "work" per frame (clock advances)
+            return [cat_at(W / 2)]
+
+        c.run(slow_perceive, lambda: 1000,
+              max_frames=3, period_s=0.05,
+              sleep=lambda s: slept.append(s), now=now)
+        assert slept == []        # work > period -> never sleeps
+
     def test_run_enables_ultrasonic(self):
         sensors = FakeSensors()
         c = ChaseController(RecordingActuators(), sensors)

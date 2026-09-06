@@ -8,8 +8,13 @@ can be single taps on a couch:
   Good   — the detector's box is fine → keep the label as-is
   No cat — no cat in this frame (or the box is junk) → label forced EMPTY, so
            the frame becomes a clean NEGATIVE instead of a bad positive
-  Fix    — a cat is present but the box is wrong/missing → copied into
-           review_fix/ so you open ONLY those few in a real box editor
+  Fix    — a boxed cat whose box is wrong → copied into review_fix/ to re-box
+  Missed — the detector drew NO box but a cat IS there (false negative) →
+           copied into review_fix/ to be boxed; NOT left as a poison negative
+
+The button set is context-aware: frames the detector boxed offer Good/No-cat/
+Fix; frames with no box offer No-cat/Missed. This closes the old trap where
+"Good" on a no-box frame silently stored a present cat as a negative.
 
 Every decision is saved to review_status.json (with a snapshot of the original
 label), so you can stop/resume anytime and Undo is lossless.
@@ -76,20 +81,29 @@ class ReviewStore:
             json.dump(self.status, f, indent=0)
 
     # ---- API ----------------------------------------------------------------
+    _DECISIONS = ("good", "nocat", "fix", "missed")
+
     def counts(self):
-        c = {"total": len(self.frames), "good": 0, "nocat": 0, "fix": 0, "pending": 0}
+        c = {"total": len(self.frames), "good": 0, "nocat": 0, "fix": 0,
+             "missed": 0, "pending": 0}
         for fr in self.frames:
             d = self.status.get(fr, {}).get("decision")
-            c[d if d in ("good", "nocat", "fix") else "pending"] += 1
+            c[d if d in self._DECISIONS else "pending"] += 1
         return c
 
     def decision(self, frame):
         return self.status.get(frame, {}).get("decision")
 
+    def is_boxed(self, frame):
+        """Did the detector draw a box here? (drives the context-aware UI.)"""
+        st = self.status.get(frame, {})
+        src = st["orig"] if "orig" in st else self._read_label(frame)
+        return bool(src.strip())
+
     def decide(self, frame, decision):
         if frame not in self.frames:
             raise KeyError(frame)
-        if decision not in ("good", "nocat", "fix", "undo"):
+        if decision not in self._DECISIONS + ("undo",):
             raise ValueError(decision)
         self._snapshot_orig(frame)
         orig = self.status[frame]["orig"]
@@ -106,7 +120,9 @@ class ReviewStore:
             self._write_label(frame, "")                   # force negative
             self._cleanup_fix(frame)
             self.status[frame]["decision"] = "nocat"
-        elif decision == "fix":
+        elif decision in ("fix", "missed"):
+            # Both route to review_fix/ for real boxing. "fix" carries the
+            # detector's (wrong) box to adjust; "missed" starts from empty.
             os.makedirs(self.fix_img, exist_ok=True)
             os.makedirs(self.fix_lbl, exist_ok=True)
             shutil.copy(os.path.join(self.img_dir, frame),
@@ -115,9 +131,26 @@ class ReviewStore:
             with open(os.path.join(self.fix_lbl,
                                    os.path.splitext(frame)[0] + ".txt"), "w") as f:
                 f.write(orig)
-            self.status[frame]["decision"] = "fix"
+            self.status[frame]["decision"] = decision
         self._save()
         return self.decision(frame)
+
+    def resurface_traps(self):
+        """Reopen frames mislabeled by the old trap: 'good' on a no-box frame.
+
+        Those affirmed a cat but kept an empty label (a poison negative).
+        Clears their decision so they return to the queue for proper
+        re-triage (where 'Missed' now routes them to boxing). Returns count.
+        """
+        n = 0
+        for fr in self.frames:
+            st = self.status.get(fr, {})
+            if st.get("decision") == "good" and not (st.get("orig") or "").strip():
+                st.pop("decision", None)
+                n += 1
+        if n:
+            self._save()
+        return n
 
     def _cleanup_fix(self, frame):
         for d, ext in ((self.fix_img, ".jpg"), (self.fix_lbl, ".txt")):
@@ -154,47 +187,60 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
  .tag{display:inline-block;padding:2px 8px;border-radius:8px;margin-left:6px}
  button{font-size:1.25em;padding:16px;margin:5px;width:44%;border:0;border-radius:12px;color:#fff}
  .good{background:#2e7d32}.nocat{background:#455a64}.fix{background:#e65100}
+ .missed{background:#c62828}
  .undo{background:#6a1b9a;width:44%}.nav{background:#333;width:44%}
  .grid{display:flex;flex-wrap:wrap;justify-content:center}
+ .hint{font-size:.8em;color:#888;padding:2px}
 </style></head><body>
 <div class=bar>
  <b id=pos>–</b>/<b id=tot>–</b> &nbsp; <span id=cur class=tag>?</span>
- &nbsp;|&nbsp; good <b id=cg>0</b> · nocat <b id=cn>0</b> · fix <b id=cf>0</b> · left <b id=cp>0</b>
+ &nbsp;|&nbsp; good <b id=cg>0</b> · nocat <b id=cn>0</b> · fix <b id=cf>0</b>
+ · missed <b id=cm>0</b> · left <b id=cp>0</b>
 </div>
 <img id=view src="">
-<div class=grid>
- <button class=good onclick="decide('good')">✓ Good (g)</button>
- <button class=nocat onclick="decide('nocat')">✗ No cat (n)</button>
- <button class=fix onclick="decide('fix')">✎ Fix (f)</button>
- <button class=undo onclick="decide('undo')">↶ Undo (u)</button>
- <button class=nav onclick="move(-1)">◀ Prev</button>
- <button class=nav onclick="move(1)">Next ▶</button>
-</div>
+<div class=hint id=hint></div>
+<div class=grid id=buttons></div>
 <script>
 let items=[],i=0;
+const BOXED=[  // frame the detector boxed
+ ['good','✓ Good (g)'],['nocat','✗ No cat (n)'],['fix','✎ Fix box (f)']];
+const NOBOX=[  // detector drew nothing
+ ['nocat','✗ No cat (n)'],['missed','🐾 Missed! (m)']];
 async function load(){let r=await(await fetch('/api/list')).json();
  items=r.items;refreshCounts(r.counts);
- // jump to first pending
  let p=items.findIndex(x=>!x.decision);i=p<0?0:p;show();}
 function show(){if(!items.length)return;let it=items[i];
  document.getElementById('view').src='/img/'+encodeURIComponent(it.frame)+'?'+Date.now();
  document.getElementById('pos').textContent=i+1;
  document.getElementById('tot').textContent=items.length;
  let c=document.getElementById('cur');c.textContent=it.decision||'pending';
- c.style.background={good:'#2e7d32',nocat:'#455a64',fix:'#e65100'}[it.decision]||'#b71c1c';}
+ c.style.background={good:'#2e7d32',nocat:'#455a64',fix:'#e65100',
+   missed:'#c62828'}[it.decision]||'#b71c1c';
+ document.getElementById('hint').textContent=it.boxed
+   ? 'detector boxed a cat — is the box right?'
+   : 'detector saw no cat — is that correct?';
+ let set=it.boxed?BOXED:NOBOX,html='';
+ for(const [d,label] of set) html+=`<button class="${d}" onclick="decide('${d}')">${label}</button>`;
+ html+=`<button class=undo onclick="decide('undo')">↶ Undo (u)</button>`;
+ html+=`<button class=nav onclick="move(-1)">◀ Prev</button>`;
+ html+=`<button class=nav onclick="move(1)">Next ▶</button>`;
+ document.getElementById('buttons').innerHTML=html;}
 function refreshCounts(c){cg.textContent=c.good;cn.textContent=c.nocat;
- cf.textContent=c.fix;cp.textContent=c.pending;tot.textContent=c.total;}
+ cf.textContent=c.fix;cm.textContent=c.missed;cp.textContent=c.pending;tot.textContent=c.total;}
 async function decide(d){let it=items[i];
+ // guard: keyboard shortcut must match the current frame's button set
+ let valid=(it.boxed?['good','nocat','fix']:['nocat','missed']).concat('undo');
+ if(!valid.includes(d))return;
  let r=await(await fetch('/api/decide',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({frame:it.frame,decision:d})}).then(x=>x.json()));
  it.decision=r.decision;refreshCounts(r.counts);
- if(d!=='undo'){ // auto-advance to next pending
-   let n=items.findIndex((x,k)=>k>i&&!x.decision);i=n<0?Math.min(i+1,items.length-1):n;}
+ if(d!=='undo'){let n=items.findIndex((x,k)=>k>i&&!x.decision);i=n<0?Math.min(i+1,items.length-1):n;}
  show();}
 function move(d){i=Math.max(0,Math.min(items.length-1,i+d));show();}
 document.onkeydown=e=>{let k=e.key.toLowerCase();
  if(k==='g')decide('good');else if(k==='n')decide('nocat');
- else if(k==='f')decide('fix');else if(k==='u')decide('undo');
+ else if(k==='f')decide('fix');else if(k==='m')decide('missed');
+ else if(k==='u')decide('undo');
  else if(e.key==='ArrowLeft')move(-1);else if(e.key==='ArrowRight')move(1);};
 load();
 </script></body></html>"""
@@ -211,7 +257,8 @@ def make_app(store):
     @app.route("/api/list")
     def api_list():
         return jsonify({
-            "items": [{"frame": fr, "decision": store.decision(fr)} for fr in store.frames],
+            "items": [{"frame": fr, "decision": store.decision(fr),
+                       "boxed": store.is_boxed(fr)} for fr in store.frames],
             "counts": store.counts(),
         })
 
@@ -239,12 +286,20 @@ def main(argv=None) -> int:
     p.add_argument("dataset", help="datasets/<session> directory")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
+    p.add_argument("--fix-traps", action="store_true",
+                   help="reopen frames mislabeled by the old 'good on no-box' "
+                        "trap so you can re-triage them as Missed, then exit")
     args = p.parse_args(argv)
 
     if not os.path.isdir(os.path.join(args.dataset, "images")):
         print(f"[review] no images/ under {args.dataset}", file=sys.stderr)
         return 1
     store = ReviewStore(args.dataset)
+    if args.fix_traps:
+        n = store.resurface_traps()
+        print(f"[review] reopened {n} trap frame(s) ('good' on no-box) for "
+              f"re-triage — run again without --fix-traps and press Missed.")
+        return 0
     print(f"[review] {len(store.frames)} frames in {args.dataset}")
     print(f"[review] open http://<this-host>:{args.port}   (g/n/f/u + arrows)")
     make_app(store).run(host=args.host, port=args.port, threaded=True)

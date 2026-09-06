@@ -72,6 +72,29 @@ class TestReviewStore:
         with pytest.raises(ValueError):
             s.decide("f0.jpg", "dog")
 
+    def test_is_boxed_reflects_detector_output(self, tmp_path):
+        boxed = ReviewStore(_dataset(tmp_path, with_box=True))
+        empty = ReviewStore(_dataset(tmp_path / "e", with_box=False))
+        assert boxed.is_boxed("f0.jpg") is True
+        assert empty.is_boxed("f0.jpg") is False
+
+    def test_missed_quarantines_for_boxing(self, tmp_path):
+        ds = _dataset(tmp_path, with_box=False)   # detector drew nothing
+        s = ReviewStore(ds)
+        s.decide("f0.jpg", "missed")
+        assert s.decision("f0.jpg") == "missed"
+        assert s.counts()["missed"] == 1
+        assert os.path.exists(os.path.join(ds, "review_fix", "images", "f0.jpg"))
+
+    def test_fix_traps_reopens_good_on_empty(self, tmp_path):
+        ds = _dataset(tmp_path, with_box=False)
+        s = ReviewStore(ds)
+        s.decide("f0.jpg", "good")        # the old trap: cat kept as negative
+        s.decide("f1.jpg", "nocat")       # legitimately empty — must NOT reopen
+        assert s.resurface_traps() == 1
+        assert s.decision("f0.jpg") is None      # reopened
+        assert s.decision("f1.jpg") == "nocat"   # untouched
+
 
 class TestReviewApp:
     def test_list_and_decide(self, tmp_path):

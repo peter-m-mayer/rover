@@ -127,12 +127,22 @@ legs-only crops). Recognition is not the bottleneck; don't fine-tune yet.
    background = training poison). Verified by eye: every "good"-on-empty frame
    contains the cat. They must be re-boxed (→ positives) before training;
    they're the highest-value hard examples.
-2. **Review-tool trap:** "good" is ambiguous on a no-box frame. `review.py`
-   should either hide "good" when there's no detector box, or add an explicit
-   "Missed" action that routes to `review_fix/` as a to-be-boxed positive.
-   Until fixed, `dataset_stats` interprets good/fix-on-empty as a missed cat
-   (FN). Earlier figures ("93%", then "99.5%") predate identifying the FN
-   quadrant.
+2. **Review-tool trap — FIXED (2026-09-07).** `review.py` now shows
+   context-aware buttons: boxed frames get Good/No-cat/Fix; no-box frames get
+   No-cat/**Missed** (🐾, key `m`), which routes to `review_fix/` as a
+   to-be-boxed positive instead of a poison negative. To reopen the 23 already
+   mislabeled frames for re-triage:
+   `python3 -m catchaser.review datasets/<name> --fix-traps` (clears their
+   "good" decision so they return to the queue), then review and press Missed.
+   `dataset_stats` counts the explicit "missed" decision as FN (and still
+   treats legacy good/fix-on-empty as FN for pre-fix data). Earlier figures
+   ("93%", then "99.5%") predate identifying the FN quadrant.
+
+**Chase loop rate (2026-09-07):** `run()` used to `sleep(period)`
+unconditionally after perception (~50-70 ms), throttling the loop to ~6 Hz —
+half the detector rate — and adding tracking latency. Fixed to sleep only the
+period *remainder*, so the detector (~15 Hz) is the limiter. Higher loop rate
+= tighter centroid tracking. See [[chase-controller]] tuning.
 
 Ideas not yet implemented, in rough value order:
 1. **Pan-servo search**: sweep the camera (0-180°) with the chassis parked —
