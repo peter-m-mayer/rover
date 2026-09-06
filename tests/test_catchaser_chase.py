@@ -128,6 +128,14 @@ class TestUltrasonicStop:
         cmd = c.compute([cat_at(W / 2)], distance_mm=-1)
         assert cmd.forward > 0
 
+    def test_forward_tapers_near_stop_range(self):
+        c = make_controller()
+        far = c.compute([cat_at(W / 2)], distance_mm=3000)
+        c.reset()
+        near = c.compute([cat_at(W / 2)], distance_mm=config.CHASE_STOP_MM + 100)
+        assert near.state == STATE_TRACKING
+        assert 0 < near.forward < far.forward   # gentle final approach
+
     def test_hold_still_steers_to_track(self):
         c = make_controller()
         cmd = c.compute([cat_at(W * 0.75)], distance_mm=100)

@@ -89,7 +89,10 @@ CROSSTRACK_PID_D = 0.002
 # Heading PID: input is normalized horizontal error of the cat centroid,
 # err = (cx - W/2) / (W/2) in [-1, 1] (+ = cat to the right of frame center).
 # Output is a mecanum turn command in motor units (+ = rotate clockwise/right).
-CHASE_HEADING_KP = 80.0            # motor units per unit normalized error
+# KP calibrated on hardware (2026-09-06 floor run): at ~6 Hz real loop rate,
+# KP=80 overshot — turn=+44 flipped err +0.38 -> -0.27 in one frame
+# (~0.015 err per turn-unit per frame). Target ~60% correction per frame.
+CHASE_HEADING_KP = 40.0            # motor units per unit normalized error
 CHASE_HEADING_KI = 0.0             # off by default (avoids windup while searching)
 CHASE_HEADING_KD = 6.0             # damps overshoot on fast centroid swings
 CHASE_FORWARD_SPEED = NAV_SPEED    # base approach speed when cat is centered
@@ -105,8 +108,15 @@ CHASE_SEARCH_STARE_FRAMES = 3      # stationary detection frames per cycle
 CHASE_LOST_GRACE_FRAMES = 3        # hold position this many lost frames before search-spin
 CHASE_CENTER_DEADBAND = 0.06       # |err| below this counts as centered (no turn)
 CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forward drive
-CHASE_MIN_CONFIDENCE = 0.35        # ignore detections below this confidence
-CHASE_LOOP_HZ = 10                 # target control loop rate
+# 0.50 calibrated from floor-run snapshots (2026-09-06): every real-cat
+# detection scored >=0.53; false positives (legs, blurred objects) hit
+# 0.41-0.45. Dim iPad-screen decoys can drop below 0.5 — max screen
+# brightness fixes that.
+CHASE_MIN_CONFIDENCE = 0.50        # ignore detections below this confidence
+CHASE_LOOP_HZ = 20                 # loop pacing cap; detector (~50 ms) is the
+                                   # real limiter, so this yields ~9 Hz on Pi 5
+CHASE_APPROACH_TAPER_MM = 400      # start slowing this far beyond stop range
+CHASE_APPROACH_MIN_FACTOR = 0.35   # floor of the close-range speed taper
 
 # =============================================================================
 # Camera

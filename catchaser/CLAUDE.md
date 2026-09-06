@@ -70,6 +70,40 @@ Ran on the real robot (`ssh pi@192.168.0.32`, pw `yahboom`). See root
    receiver must be powered on first: `Ctrl_IR_Switch(1)` (exposed as
    `Sensors.enable_ir()`, called by `ChaseController.run()`).
 
+### Floor runs with live cat (2026-09-06 evening)
+
+Two 120 s untethered-WiFi floor runs, real cat in room + iPad decoy.
+**Run 2 ended in HOLD at the actual cat** (snapshot-confirmed point-blank
+approach sequence) — first successful chase. What the data taught us:
+
+- **Continuous search spin outruns the detector** (~6 Hz loop, ~65° FOV,
+  heavy rotation blur): run 1 had 15+ single-frame edge acquisitions.
+  → fixed with pulsed spin-and-stare (2 spin / 3 stare frames).
+- **KP=80 (sim-tuned, 10 Hz) overshoots at the real ~6 Hz**: telemetry showed
+  err sign-flips in one frame (turn=+44 flipped err +0.38→-0.27, ~0.015
+  err/turn-unit/frame). → KP=40, and the PID D-term now needs two consecutive
+  tracked frames (fresh-acquisition D-kick was a bug).
+- **Detection snapshots (`--save-dir`) are the debugging superpower** — the
+  14 annotated frames settled recognition-vs-control instantly. Findings:
+  every real-cat hit ≥0.53; false positives (legs 0.45, motion-blurred trash
+  can 0.41, jacket 0.63) → `CHASE_MIN_CONFIDENCE` raised 0.35→0.50. Camera is
+  fixed-focus: sharp ~0.4 m→∞, mush closer than ~0.3 m. iPad decoy works at
+  max screen brightness only (dim screen → 0.37-0.39, below threshold now).
+- Other deployed tuning: close-range approach taper (CHASE_APPROACH_*),
+  camera CAP_PROP_BUFFERSIZE=1 (stale-frame latency), CHASE_LOOP_HZ 20.
+- **Fine-tuning the ONNX on the specific cat is NOT needed** — recognition is
+  solid; every failure was control-side. Revisit only if a *second* pet needs
+  discriminating.
+
+Ideas not yet implemented, in rough value order:
+1. **Pan-servo search**: sweep the camera (0-180°) with the chassis parked —
+   sharp frames, 3× FOV coverage, no blur. Needs one hardware check first:
+   servo direction sign vs. sim convention (pan>90 = camera left in sim).
+   On detection at pan θ: body heading error = cam_err − (θ−90)/32.5, then
+   recenter pan.
+2. Exposure control: shorter camera exposure (v4l2) to cut rotation blur.
+3. Centroid velocity prediction (lead pursuit) once tracking is stable.
+
 ### Wheels-off hardware test results (2026-09-06)
 
 `python3 -m catchaser.chase --forward-speed 0 --search-speed 0` with a phone

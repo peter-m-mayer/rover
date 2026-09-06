@@ -110,6 +110,7 @@ class ChaseController:
         """Clear PID state and search memory."""
         self._integral = 0.0
         self._prev_error = 0.0
+        self._have_prev = False      # no D-term until a second tracked frame
         self._frames_lost = 0
         self._last_seen_sign = 1.0   # default: search to the right first
 
@@ -144,10 +145,16 @@ class ChaseController:
         # Deadband: treat a nearly-centered cat as centered (no jitter).
         err_eff = 0.0 if abs(err) < self.center_deadband else err
 
-        # Heading PID -> turn command.
+        # Heading PID -> turn command. The D-term needs two consecutive
+        # tracked frames — on a fresh acquisition prev_error is meaningless
+        # and would add a spurious kick toward overshoot.
         self._integral += err_eff * dt
-        deriv = (err_eff - self._prev_error) / dt if dt > 0 else 0.0
+        if self._have_prev and dt > 0:
+            deriv = (err_eff - self._prev_error) / dt
+        else:
+            deriv = 0.0
         self._prev_error = err_eff
+        self._have_prev = True
         turn = self.kp * err_eff + self.ki * self._integral + self.kd * deriv
         turn = _clamp(turn, -self.turn_max, self.turn_max)
 
@@ -164,6 +171,13 @@ class ChaseController:
         else:
             forward = self.forward_speed * (1.0 - abs(err) / self.turn_only_error)
 
+        # Close-range taper: ease off as the ultrasonic closes on the stop
+        # band, so the final approach is gentle (and the camera stays inside
+        # its focus range longer) instead of charging to the 200 mm wall.
+        if forward > 0 and distance_mm > 0:
+            frac = (distance_mm - self.stop_mm) / float(config.CHASE_APPROACH_TAPER_MM)
+            forward *= _clamp(frac, config.CHASE_APPROACH_MIN_FACTOR, 1.0)
+
         forward, turn = self._cap(forward, turn)
         return DriveCommand(forward, turn, STATE_TRACKING, err, distance_mm)
 
@@ -179,6 +193,7 @@ class ChaseController:
         self._frames_lost += 1
         self._integral = 0.0
         self._prev_error = 0.0
+        self._have_prev = False
         if self._frames_lost <= self.lost_grace_frames:
             return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold")
         cycle_pos = (self._frames_lost - self.lost_grace_frames - 1) % (

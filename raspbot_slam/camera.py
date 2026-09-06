@@ -58,6 +58,10 @@ class Camera:
         self._cap = cv2.VideoCapture(self._device)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+        # Keep the driver queue at 1 frame: a control loop slower than the
+        # camera FPS otherwise reads stale buffered frames (hundreds of ms
+        # of hidden latency). Best-effort; not all backends honor it.
+        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not self._cap.isOpened():
             raise RuntimeError(f"Failed to open camera device {self._device}")
 
