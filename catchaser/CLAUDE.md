@@ -107,8 +107,19 @@ second pet ever requires discrimination — recognition itself is solid):
 2. **Triage** from the couch: `python3 -m catchaser.review datasets/<name>`
    → phone at `http://<pi-ip>:5000`; g=Good / n=No cat / f=Fix (Fix copies
    into `review_fix/` for a real box editor); lossless undo/resume.
-3. **Train** elsewhere (ultralytics on a PC), export ONNX 320 px opset 12,
+3. **Stats** anytime: `python3 -m catchaser.dataset_stats` — per-session +
+   combined detector precision (of frames where the detector *claimed* a cat)
+   and pos/neg composition. Reads each `review_status.json`.
+4. **Train** elsewhere (ultralytics on a PC), export ONNX 320 px opset 12,
    drop into `catchaser/models/`.
+
+**Triage results so far (2 sessions, 244 frames, 2026-09-07):** 198 detector
+cat-claims → 197 confirmed, 1 box-fix, **0 false positives (99.5% precision)**;
+198 positives / 46 negatives. ~40% of a ~500-positive fine-tune target.
+Recognition is not the bottleneck — don't fine-tune yet; these sessions are
+the eval set a future model must beat. NB: an earlier "93% precision" figure
+was wrong (it counted `nocat` clicks on already-empty frames as detector
+errors); `dataset_stats` computes it correctly against the original label.
 
 Ideas not yet implemented, in rough value order:
 1. **Pan-servo search**: sweep the camera (0-180°) with the chassis parked —

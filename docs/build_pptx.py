@@ -118,7 +118,7 @@ def stat(slide, left, top, num, label, color=GREEN):
     para(tf, label.upper(), size=9, color=TEXT_DIM, space_after=0)
 
 
-def build(images_dir, out_path):
+def build(images_dir, out_path, video_path=None, poster_path=None):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -191,7 +191,7 @@ def build(images_dir, out_path):
         ("Runtime", "pure onnxruntime + OpenCV on the robot — no ultralytics, no torch. "
                     "Letterbox -> NCHW -> NMS in ~150 lines."),
         ("Threshold", "conf >= 0.50, field-calibrated: real cat always >= 0.53, false positives 0.41–0.45"),
-        ("Fine-tune?", "Not yet — 93% raw precision in the field. Pipeline stands ready."),
+        ("Fine-tune?", "Not yet — 99.5% precision over 244 triaged frames, 0 false positives. Pipeline ready."),
     ], Inches(0.7), Inches(1.9), Inches(6.7))
     code_panel(s, [
         ("VALIDATION LADDER", GREEN_DIM),
@@ -323,6 +323,37 @@ def build(images_dir, out_path):
              "from guesswork into evidence — every claim in this deck traces to a frame or a "
              "log line.", size=12, color=TEXT_DIM, first=True)
 
+    # ---- 9b · chase tape (embedded video) ----------------------------------
+    if video_path and os.path.exists(video_path):
+        s = add_slide(prs)
+        kicker(s, "// 08b · the chase · uncut · iphone tape")
+        title(s, "Roll the footage")
+        # Portrait video: place it left, tall; notes on the right.
+        vid_w, vid_h = Inches(3.1), Inches(5.5)
+        vid_left, vid_top = Inches(0.9), Inches(1.7)
+        try:
+            s.shapes.add_movie(
+                video_path, vid_left, vid_top, vid_w, vid_h,
+                poster_frame_image=(poster_path if poster_path
+                                    and os.path.exists(poster_path) else None),
+                mime_type="video/mp4")
+        except Exception as e:
+            tf = text_box(s, vid_left, vid_top, vid_w, Inches(1))
+            para(tf, f"[video embed failed: {e}]", size=11, color=RED, first=True)
+        code_panel(s, [
+            ("THE CHASE · IMG_3375", GREEN_DIM),
+            ("", TEXT),
+            ("source    1080p · 112 MB", TEXT),
+            ("encoded   720p H.264 · 2.6 MB", GREEN),
+            ("embedded  right here in this deck", TEXT),
+            ("", TEXT),
+            ("the loop from the slides, running", TEXT_DIM),
+            ("for real: acquire, center, approach,", TEXT_DIM),
+            ("and the cat's considered response.", TEXT_DIM),
+            ("", TEXT),
+            ("verdict   cat: unbothered", AMBER),
+        ], Inches(4.6), Inches(1.9), Inches(8.0), Inches(3.6), size=13)
+
     # ---- 10 · bloopers ------------------------------------------------------
     s = add_slide(prs)
     kicker(s, "// 09 · the blooper reel · what the robot thought was a cat")
@@ -352,14 +383,14 @@ def build(images_dir, out_path):
         ("f = Fix     route to real box editor", AMBER),
         ("u = Undo    lossless, resume anytime", CYAN),
     ], Inches(0.7), Inches(1.9), Inches(6.0), Inches(3.4), size=12)
-    stat(s, Inches(7.3), Inches(2.0), "172", "frames triaged · session 1")
-    stat(s, Inches(9.9), Inches(2.0), "93%", "raw detector precision")
-    stat(s, Inches(7.3), Inches(3.3), "143/29", "positives / negatives")
-    stat(s, Inches(9.9), Inches(3.3), "160·11·1", "good · no-cat · fix", color=CYAN)
+    stat(s, Inches(7.3), Inches(2.0), "244", "frames triaged · 2 sessions")
+    stat(s, Inches(9.9), Inches(2.0), "99.5%", "detector precision")
+    stat(s, Inches(7.3), Inches(3.3), "198/46", "positives / negatives")
+    stat(s, Inches(9.9), Inches(3.3), "0 FP", "false positives · 1 box-fix", color=CYAN)
     tf = text_box(s, Inches(7.3), Inches(4.6), Inches(5.3), Inches(2))
-    para(tf, "Verdict: the pretrained net is good enough that fine-tuning waits for ~500 varied "
-             "positives. Session 1 becomes the eval set any future model must beat.", size=12,
-         color=TEXT_DIM, first=True)
+    para(tf, "Of 198 detector cat-claims: 197 confirmed, 1 box-fix, zero false positives. "
+             "Fine-tuning waits for ~500 varied positives (40% there); these sessions become "
+             "the eval set any future model must beat.", size=12, color=TEXT_DIM, first=True)
 
     # ---- 12 · roadmap -------------------------------------------------------
     s = add_slide(prs)
@@ -411,6 +442,8 @@ def build(images_dir, out_path):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", default="/tmp/dets")
+    ap.add_argument("--video", default=os.path.join(HERE, "catchaser_chase.mp4"))
+    ap.add_argument("--poster", default=os.path.join(HERE, "chase_poster.jpg"))
     ap.add_argument("--out", default=os.path.join(HERE, "catchaser_presentation.pptx"))
     args = ap.parse_args()
-    build(args.images, args.out)
+    build(args.images, args.out, video_path=args.video, poster_path=args.poster)

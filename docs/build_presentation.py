@@ -17,13 +17,23 @@ def b64(images_dir, name):
         return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
 
 
-def build(images_dir, out_path):
+def build(images_dir, out_path, video_path=None):
     img = {k: b64(images_dir, f"det_{k}.jpg")
            for k in ("001", "008", "010", "011", "012", "013")}
 
     html = HTML_TEMPLATE
     for k, v in img.items():
         html = html.replace("{{IMG_" + k + "}}", v)
+
+    if video_path and os.path.exists(video_path):
+        with open(video_path, "rb") as f:
+            vid = "data:video/mp4;base64," + base64.b64encode(f.read()).decode()
+        html = html.replace("{{VIDEO}}", vid)
+    else:
+        # No video available: drop the whole video slide cleanly.
+        import re
+        html = re.sub(r"<!-- VIDEO_SLIDE_START -->.*?<!-- VIDEO_SLIDE_END -->",
+                      "", html, flags=re.S)
 
     with open(out_path, "w") as f:
         f.write(html)
@@ -253,7 +263,7 @@ table.spec td .d{color:var(--text-dim)}
         <li><b>Export:</b> <span class="d">yolov8n.pt → ONNX · 320 px input · opset 12 · simplified · 12.1 MB · ~3.2M params</span></li>
         <li><b>Runtime:</b> <span class="d">pure onnxruntime + OpenCV on the robot — no ultralytics, no torch. Letterbox → NCHW → NMS in ~150 lines.</span></li>
         <li><b>Threshold:</b> <span class="d">conf ≥ 0.50, calibrated from field data (real cat ≥ 0.53 always; false positives 0.41–0.45).</span></li>
-        <li><b>Fine-tune?</b> <span class="d">Not yet — 93% raw precision on field frames. Dataset pipeline stands ready if a second pet ever needs discriminating.</span></li>
+        <li><b>Fine-tune?</b> <span class="d">Not yet — 99.5% precision over 244 triaged field frames (0 false positives). Dataset pipeline stands ready if a second pet ever needs discriminating.</span></li>
       </ul>
     </div>
     <div>
@@ -405,6 +415,30 @@ slam suite (inherited)             <span class="g">190</span>
   deck traces to a frame or a log line.</p>
 </section>
 
+<!-- VIDEO_SLIDE_START -->
+<!-- 9b · CHASE TAPE -->
+<section class="slide" data-state="● REC" data-color="#ff5470">
+  <div class="kicker">// 08b · the chase · uncut · <b>iPhone tape</b></div>
+  <h2>Roll the <span class="accent">footage</span></h2>
+  <div style="display:flex;gap:2.5rem;align-items:center;flex-wrap:wrap">
+    <figure class="hud" style="flex:0 0 auto">
+      <video src="{{VIDEO}}" poster="" controls playsinline preload="metadata"
+             style="display:block;height:52vh;max-height:440px;width:auto;background:#000"></video>
+      <div class="corners"><i></i><i></i><i></i><i></i></div>
+      <figcaption><span>IMG_3375 · LIVING ROOM · 62 s</span><span class="conf">▶ TAP TO PLAY</span></figcaption>
+    </figure>
+    <div style="flex:1;min-width:260px">
+      <p class="lede">The Cat Chaser 3000, in the field, in motion — the loop from
+      the slides running for real: acquire, center, approach, and the cat's
+      considered response.</p>
+      <div class="term" style="margin-top:1.2rem">
+<span class="dim">source</span>   IMG_3375.MOV · 1080p · 112 MB
+<span class="dim">encoded</span>  720p H.264 · <span class="g">2.6 MB</span> · embedded here
+<span class="dim">verdict</span>  cat: <span class="a">unbothered</span></div>
+    </div>
+  </div>
+</section>
+
 <!-- 10 · BLOOPERS -->
 <section class="slide" data-state="FP" data-color="#ff5470">
   <div class="kicker">// 09 · THE BLOOPER REEL · WHAT THE ROBOT THOUGHT WAS A CAT</div>
@@ -445,13 +479,14 @@ $ <span class="w">./review.sh</span>           <span class="dim"># triage server
     </div>
     <div>
       <div class="stat-row">
-        <div><div class="big-num">172</div><div class="stat-label">frames triaged · session 1</div></div>
-        <div><div class="big-num">93<small>%</small></div><div class="stat-label">raw detector precision</div></div>
-        <div><div class="big-num">143<small>/29</small></div><div class="stat-label">positives / negatives</div></div>
+        <div><div class="big-num">244</div><div class="stat-label">frames triaged · 2 sessions</div></div>
+        <div><div class="big-num">99.5<small>%</small></div><div class="stat-label">detector precision</div></div>
+        <div><div class="big-num">198<small>/46</small></div><div class="stat-label">positives / negatives</div></div>
       </div>
-      <p class="lede">Verdict: 160 good · 11 no-cat · 1 fix. The pretrained net is good enough
-      that fine-tuning waits until ~500 varied positives exist — session 1 becomes the
-      <i>eval set</i> that any future model must beat.</p>
+      <p class="lede">Of 198 frames where the detector claimed a cat: <b style="color:#eaffe6">197
+      confirmed</b>, 1 box-fix, <b style="color:var(--green)">zero false positives</b>. (The
+      blooper reel was early runs before the 0.50 threshold.) Fine-tuning waits for ~500 varied
+      positives — 40% there; these sessions become the <i>eval set</i> any future model must beat.</p>
     </div>
   </div>
 </section>
@@ -556,6 +591,7 @@ go(parseInt(location.hash.slice(1))-1||0);
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", default="/tmp/dets")
+    ap.add_argument("--video", default=os.path.join(HERE, "catchaser_chase.mp4"))
     ap.add_argument("--out", default=os.path.join(HERE, "catchaser_presentation.html"))
     args = ap.parse_args()
-    build(args.images, args.out)
+    build(args.images, args.out, video_path=args.video)
