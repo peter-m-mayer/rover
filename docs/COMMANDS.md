@@ -80,6 +80,11 @@ Hold keys to move; release to stop. Combine keys for diagonals (mecanum).
 | `i` | tilt up | `m` | tilt down |
 | `h` | camera home | `0` | set current pose as home (recalibrate) |
 
+Status bar shows a **pwr** indicator (Pi undervoltage flag): **OK** (green) =
+rail fine · **⚠ dipped** (amber) = under-voltage happened earlier (likely a
+motor-stall brownout) · **⚠ LOW NOW** (red) = rail sagging right now → back off
+speed / charge. Numpad 4/6 rotate with NumLock on OR off.
+
 Safety: releasing keys stops the wheels; a server dead-man stops them if the
 browser goes quiet (~0.6 s); closing the tab stops the robot.
 

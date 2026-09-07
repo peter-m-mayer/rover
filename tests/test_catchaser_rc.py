@@ -136,6 +136,26 @@ class TestFrameGrabber:
         assert g.latest() == "frame4"      # recovered to a good frame
 
 
+class TestPower:
+    def test_read_throttled_parses_states(self):
+        from catchaser.rc import read_throttled
+        assert read_throttled(lambda: "throttled=0x0") == "ok"
+        assert read_throttled(lambda: "throttled=0x1") == "now"      # under-volt now
+        assert read_throttled(lambda: "throttled=0x50000") == "seen"  # occurred (bit16)
+        assert read_throttled(lambda: "garbage") == "?"
+
+    def test_power_uses_injected_reader(self):
+        c = RCController(RecordingActuators(), FakeSensors(),
+                         power_reader=lambda: "seen")
+        assert c.power() == "seen"
+
+    def test_power_reader_exception_is_safe(self):
+        def boom():
+            raise RuntimeError("no vcgencmd")
+        c = RCController(RecordingActuators(), power_reader=boom)
+        assert c.power() == "?"
+
+
 class TestApp:
     def _client(self):
         pytest.importorskip("flask")
@@ -160,6 +180,7 @@ class TestApp:
         assert r["home"] is True
         st = client.get("/api/state").get_json()
         assert st["distance"] == 512 and "speed" in st
+        assert "undervolt" in st            # power health surfaced to the UI
 
     def test_speed_endpoint(self):
         client, c = self._client()

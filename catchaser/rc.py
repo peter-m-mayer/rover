@@ -32,6 +32,31 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def read_throttled(runner=None):
+    """Pi power health from `vcgencmd get_throttled`.
+
+    Returns one of: 'ok' (rail fine), 'seen' (under-voltage happened since
+    boot but not now — e.g. an earlier motor-stall brownout), 'now' (rail is
+    sagging right now), '?' (couldn't read). Bit 0 = under-voltage now,
+    bit 16 = under-voltage has occurred.
+    """
+    if runner is None:
+        import subprocess
+
+        def runner():
+            return subprocess.check_output(["vcgencmd", "get_throttled"],
+                                           timeout=2).decode()
+    try:
+        val = int(runner().strip().split("=")[1], 16)
+    except Exception:
+        return "?"
+    if val & 0x1:
+        return "now"
+    if val & 0x10000:
+        return "seen"
+    return "ok"
+
+
 class FrameGrabber:
     """Continuously grab the newest camera frame in a background thread.
 
@@ -88,10 +113,11 @@ class RCController:
     """Manual drive + camera control. Pure of I/O timing — unit-testable."""
 
     def __init__(self, actuators, sensors=None, speed: int = 90,
-                 pan: float = None, tilt: float = None):
+                 pan: float = None, tilt: float = None, power_reader=None):
         self.act = actuators
         self.sensors = sensors
         self.speed = int(speed)
+        self._power_reader = power_reader or read_throttled
         self.pan = float(config.SERVO_PAN_CENTER if pan is None else pan)
         self.tilt = float(config.SERVO_TILT_REST if tilt is None else tilt)
         self.home_pan = self.pan
@@ -154,6 +180,13 @@ class RCController:
         except Exception:
             return -1
 
+    def power(self):
+        """Pi power health: 'ok' / 'seen' / 'now' / '?' (undervoltage flag)."""
+        try:
+            return self._power_reader()
+        except Exception:
+            return "?"
+
     # ---- home persistence ---------------------------------------------------
     def _persist_home(self):
         import json
@@ -206,7 +239,7 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
   camera reconnecting…</div>
 </div>
 <div class=bar>speed <b id=spd>?</b> · pan <b id=pan>?</b> · tilt <b id=tlt>?</b>
-  · dist <b id=dst>?</b>mm · <b id=drv>idle</b></div>
+  · dist <b id=dst>?</b>mm · pwr <b id=pwr>?</b> · <b id=drv>idle</b></div>
 <div class=pad>
  <button class=cam data-a=TILTUP>tilt▲ (i)</button>
  <button data-a=FWD>fwd (8/↑)</button>
@@ -289,8 +322,12 @@ function nextFrame(){view.src='/snapshot.jpg?'+Date.now();}
 view.onload=()=>{rc.style.display='none';setTimeout(nextFrame,80);};   // ~12 fps
 view.onerror=()=>{rc.style.display='block';setTimeout(nextFrame,600);};
 nextFrame();
+const PWR={ok:['OK','#6cff5c'],seen:['⚠ dipped','#ffb454'],
+ now:['⚠ LOW NOW','#ff5470'],'?':['?','#7d967a']};
 async function poll(){try{const s=await(await fetch('/api/state')).json();show(s);
- if(s.distance!=null)dst.textContent=s.distance;}catch(e){}}
+ if(s.distance!=null)dst.textContent=s.distance;
+ if(s.undervolt!=null){const p=PWR[s.undervolt]||PWR['?'];pwr.textContent=p[0];pwr.style.color=p[1];}
+}catch(e){}}
 setInterval(poll,500);poll();
 </script></body></html>"""
 
@@ -348,7 +385,7 @@ def make_app(rc, frame_source=None):
     @app.route("/api/state")
     def state():
         return jsonify({"pan": rc.pan, "tilt": rc.tilt, "speed": rc.speed,
-                        "distance": rc.distance_mm()})
+                        "distance": rc.distance_mm(), "undervolt": rc.power()})
 
     @app.route("/snapshot.jpg")
     def snapshot():
