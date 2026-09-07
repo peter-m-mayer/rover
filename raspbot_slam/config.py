@@ -135,8 +135,11 @@ CHASE_PAN_TURN_ONLY_DEG = 55.0     # if pan is past this, stop forward, let body
 # camera. Hysteresis (engage > release) stops the body from chattering.
 CHASE_PAN_BODY_ENGAGE_DEG = 42.0   # body starts coarse-rotating past this pan offset
 CHASE_PAN_BODY_RELEASE_DEG = 14.0  # ...and keeps going until back within this
-CHASE_PAN_BODY_ROTATE = 45         # slow, steady body-rotate speed while coarse-aligning
-CHASE_PAN_SEARCH_ROTATE = 40       # slow CONTINUOUS search rotate (pan mode; no stop-and-go)
+# Halved 2026-09-07: coarse-align/search rotation was blurring frames enough
+# that the detector lost the cat mid-turn. Slower body rotate = less motion
+# blur (and less motor-stall current on carpet). Tune further if still blurry.
+CHASE_PAN_BODY_ROTATE = 22         # slow, steady body-rotate speed while coarse-aligning
+CHASE_PAN_SEARCH_ROTATE = 20       # slow CONTINUOUS search rotate (pan mode; no stop-and-go)
 
 # --- Prey / play mode (behavioral: dart, freeze, flee — what cats hunt) ------
 # Relentless smooth pursuit reads as boring or threatening. Prey darts and

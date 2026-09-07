@@ -2,6 +2,9 @@
 
 Indoor floor mapping and autonomous navigation for the [Yahboom RASPBOT-V2](https://www.yahboom.net/study/RASPBOT-V2) rover on Raspberry Pi 5.
 
+> **🐈 Cat Chaser 3000** lives in [`catchaser/`](catchaser/). Everyday commands &
+> aliases (`play`, `rcbot`, `review`, …) are in **[docs/COMMANDS.md](docs/COMMANDS.md)**.
+
 ## What This Does
 
 The rover autonomously explores your house, builds a map of the floor plan using its single camera, and then navigates to commanded locations using that map. No lidar, no encoders, no IMU -- just a camera, an ultrasonic sensor, and mecanum wheels.
