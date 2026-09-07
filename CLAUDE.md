@@ -7,7 +7,14 @@
   `.113` on 2026-09-06). Find it by ping-sweeping port 22 on `192.168.0.x`,
   or fix it permanently with a **DHCP reservation** in the TP-Link admin page
   (recommended; MAC is the wlan0 one).
-- **Ethernet (when plugged): `192.168.0.32`** — same router.
+- **Ethernet tether (static): `192.168.0.40`** — bound to the `Wired
+  connection 1` profile (eth0 MAC `88:a2:9e:3f:96:7f`), `manual`
+  192.168.0.40/24, gw/dns 192.168.0.1, route-metric 700 (so WiFi stays the
+  default route when both are up), autoconnect on. Plug the Pi into the router
+  (or a LAN switch) and it's always `ssh pi@192.168.0.40`. Undo:
+  `sudo nmcli connection modify "Wired connection 1" ipv4.method auto`.
+  Picked .40 because .40–.49 were all free (below the DHCP pool); if it ever
+  collides, reserve it on the router or pick another sub-pool address.
 - **Phone-driven operation:** helper scripts live on the Pi —
   `./harvest.sh [secs]` (10 s countdown, chase + dataset harvest, prints
   summary) and `./review.sh` (triage server on the newest dataset; open
