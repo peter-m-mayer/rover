@@ -176,6 +176,14 @@ body-follow target, so getting it right removes a steady-state heading bias.
 `stats`, `bench`, `hellobot`, `catpull` (git pull).
 
 Still open, in rough value order:
+0. **Closed-loop rotation feedback (Peter's ask, 2026-09-07, deferred):** the
+   rover has no encoders, so commanded rotation ≠ actual rotation (worse on
+   carpet, where mecanum wheels scrub). Idea: measure real yaw rate from the
+   camera — optical flow (mean horizontal flow of background features ∝ yaw
+   rate) or ORB feature displacement — and close the loop on it, instead of
+   trusting open-loop motor commands. Would sharpen search rotate + coarse
+   align. (The ICM-20948 IMU gyro, if fitted, is the other option — see
+   raspbot_slam/imu.py + SLAM_PLAN.md Phase 5.) Not started.
 1. ~~Hardware servo-sign check for pan~~ — DONE (sign +1, center 77).
 2. Exposure control: shorter camera exposure (v4l2) to cut rotation blur.
 3. Centroid velocity prediction (lead pursuit) once tracking is stable.
