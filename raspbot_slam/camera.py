@@ -71,6 +71,37 @@ class Camera:
             self._cap.release()
             self._cap = None
 
+    def reopen(self, devices=None) -> bool:
+        """Release and try to reopen, scanning candidate device indices.
+
+        USB cameras can re-enumerate to a different /dev/video node after a
+        power brownout (e.g. a motor-stall current spike). Try the configured
+        device first, then a few common indices. Returns True on success.
+        """
+        if cv2 is None:
+            return False
+        self.close()
+        cands = []
+        for d in (list(devices) if devices else [self._device, 0, 1, 2, 3]):
+            if d not in cands:
+                cands.append(d)
+        for d in cands:
+            try:
+                cap = cv2.VideoCapture(d)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                if cap.isOpened():
+                    ok, _ = cap.read()
+                    if ok:
+                        self._device = d
+                        self._cap = cap
+                        return True
+                cap.release()
+            except Exception:
+                pass
+        return False
+
     def is_open(self) -> bool:
         return self._cap is not None and self._cap.isOpened()
 

@@ -64,13 +64,16 @@ class FrameGrabber:
                     self._fails = 0
             except Exception:
                 self._fails += 1
-                if self._fails >= 3:        # force a reopen on the next capture
+                if self._fails >= 3:
+                    # Likely a USB brownout (motor-stall current spike) — the
+                    # camera may have re-enumerated. Try to reopen across
+                    # device indices; keep the last good frame meanwhile.
                     try:
-                        self._camera.close()
+                        self._camera.reopen()
                     except Exception:
                         pass
                     self._fails = 0
-                time.sleep(0.2)
+                time.sleep(0.3)
             time.sleep(self._period)
 
     def latest(self):
@@ -196,8 +199,14 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
  .row button{flex:1}
  .hint{font-size:.68rem;color:#54644f;padding:6px 12px 20px;line-height:1.6}
 </style></head><body>
-<img id=view src="/stream.mjpg" alt="camera"
- onerror="setTimeout(()=>{view.src='/stream.mjpg?'+Date.now()},800)">
+<div style="position:relative">
+ <img id=view src="/stream.mjpg" alt="camera"
+  onload="rc.style.display='none'"
+  onerror="rc.style.display='block';setTimeout(()=>{view.src='/stream.mjpg?'+Date.now()},800)">
+ <div id=rc style="display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  background:#3a0e14;color:#ff8ea0;padding:4px 10px;border-radius:8px;font-size:.75rem">
+  camera reconnecting… (check battery if this persists)</div>
+</div>
 <div class=bar>speed <b id=spd>?</b> · pan <b id=pan>?</b> · tilt <b id=tlt>?</b>
   · dist <b id=dst>?</b>mm · <b id=drv>idle</b></div>
 <div class=pad>

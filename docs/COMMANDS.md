@@ -108,6 +108,11 @@ python3 -m catchaser.benchmark             # detector Hz (add --camera for captu
 python3 -m catchaser.pan_check             # re-measure the pan servo direction sign
 i2cdetect -y 1                             # should show 0x2b (MCU) — needs i2c-tools
 
+# Rotation feedback (optical flow — measures ACTUAL yaw, no encoders):
+python3 -m catchaser.flowcheck --deg 90    # closed-loop: turn until flow says 90 deg (CCW +)
+python3 -m catchaser.flowcheck --deg -90   # 90 deg clockwise
+python3 -m catchaser.flowcheck --open 1.5  # open-loop spin 1.5s, report measured yaw (shows the error)
+
 # Wheels-off motor/mecanum diagnostic (watch the wheels):
 python3 -m catchaser.wheelcheck --describe # print the wheel pattern for each move
 python3 -m catchaser.wheelcheck --each     # spin motors 0,1,2,3 one at a time (verify IDs)
