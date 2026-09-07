@@ -61,6 +61,9 @@ mock mode off-robot.
 - `catchaser/` — Cat Chaser 3000 (detector + chase controller). See
   **`catchaser/CLAUDE.md`** for cat-chaser specifics, tuning, and the sim harness.
 
+**[docs/COMMANDS.md](docs/COMMANDS.md) is Peter's living command/alias reference —
+keep it current whenever a command, flag, or alias changes.**
+
 ## Tests
 
 `python -m pytest tests/ -v` (needs `opencv-python-headless numpy pybullet`).

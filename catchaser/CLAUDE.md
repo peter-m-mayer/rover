@@ -268,6 +268,21 @@ Most likely fixes: `sudo systemctl enable --now ssh` and/or `sudo ufw allow 22`
 
 ---
 
+## 3b. Command reference + RC mode + coarse/fine tracking (2026-09-07)
+
+- **[../docs/COMMANDS.md](../docs/COMMANDS.md)** is the living command/alias
+  reference — update it whenever commands/flags/aliases change.
+- **`rcbot`** (`catchaser/rc.py`): Flask web drive controller on port 5001 —
+  live MJPEG camera + keyboard/touch driving (numpad/arrows), pan/tilt, home,
+  set-home (recalibrate), speed, dead-man stop. Mecanum vector combines held
+  keys (diagonals). `RCController` is pure/tested; endpoints tested; camera
+  stream + motion are manual. Home persists to `~/.catchaser_rc_home.json`.
+- **Coarse/fine pan tracking**: pan mode now keeps the body still within a wide
+  dead-zone (`CHASE_PAN_BODY_ENGAGE_DEG`) and only slow-rotates the body to
+  re-center the pan near the FOV edge (hysteresis). Search in pan mode is a slow
+  continuous rotate (no stop-and-go). This is what makes the pan actually get
+  used. Prey lunges exaggerated +50% (dart 105, flee 135; `CHASE_MAX_SPEED` 160).
+
 ## 4. Chase controller — ✅ built (`catchaser/chase.py`)
 
 Pipeline: **detector centroid → normalized heading error → heading PID →
