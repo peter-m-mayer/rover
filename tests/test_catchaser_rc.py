@@ -131,7 +131,7 @@ class TestFrameGrabber:
         from catchaser.rc import FrameGrabber
         cam = self._Cam(fail_first=3)      # first 3 reads throw
         g = FrameGrabber(cam)
-        self._pump(g, 6)
+        self._pump(g, 4)                   # 3 fails -> reopen, then 1 good read
         assert cam.closed == 1             # reopened after 3 straight fails
         assert g.latest() == "frame4"      # recovered to a good frame
 
