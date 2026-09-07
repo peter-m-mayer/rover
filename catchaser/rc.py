@@ -200,94 +200,97 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
  .hint{font-size:.68rem;color:#54644f;padding:6px 12px 20px;line-height:1.6}
 </style></head><body>
 <div style="position:relative">
- <img id=view src="/stream.mjpg" alt="camera"
-  onload="rc.style.display='none'"
-  onerror="rc.style.display='block';setTimeout(()=>{view.src='/stream.mjpg?'+Date.now()},800)">
+ <img id=view alt="camera">
  <div id=rc style="display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);
   background:#3a0e14;color:#ff8ea0;padding:4px 10px;border-radius:8px;font-size:.75rem">
-  camera reconnecting… (check battery if this persists)</div>
+  camera reconnecting…</div>
 </div>
 <div class=bar>speed <b id=spd>?</b> · pan <b id=pan>?</b> · tilt <b id=tlt>?</b>
   · dist <b id=dst>?</b>mm · <b id=drv>idle</b></div>
 <div class=pad>
- <button class=cam data-k=i>tilt▲ (i)</button>
- <button data-k=8>fwd (8/↑)</button>
- <button class=cam data-k=0>set home (0)</button>
- <button data-k=4>⟲ rot (4)</button>
- <button class=stop data-k=" ">STOP (space)</button>
- <button data-k=6>rot ⟳ (6)</button>
- <button data-k=a>◀ slide (a)</button>
- <button data-k=2>back (2/↓)</button>
- <button data-k=s>slide ▶ (s)</button>
- <button class=cam data-k=j>pan◀ (j)</button>
- <button class=cam data-k=m>tilt▼ (m)</button>
- <button class=cam data-k=k>pan▶ (k)</button>
+ <button class=cam data-a=TILTUP>tilt▲ (i)</button>
+ <button data-a=FWD>fwd (8/↑)</button>
+ <button class=cam data-a=SETHOME>set home (0)</button>
+ <button data-a=ROTL>⟲ rot (4)</button>
+ <button class=stop data-a=STOP>STOP (space)</button>
+ <button data-a=ROTR>rot ⟳ (6)</button>
+ <button data-a=STRL>◀ slide (a/←)</button>
+ <button data-a=BACK>back (2/↓)</button>
+ <button data-a=STRR>slide ▶ (s/→)</button>
+ <button class=cam data-a=PANL>pan◀ (j)</button>
+ <button class=cam data-a=TILTDN>tilt▼ (m)</button>
+ <button class=cam data-a=PANR>pan▶ (k)</button>
 </div>
 <div class=row>
- <button data-k=-> – slower</button>
- <button class=cam data-k=h>camera home (h)</button>
- <button data-k=+>faster +</button>
+ <button data-a=SLOW>– slower</button>
+ <button class=cam data-a=HOME>camera home (h)</button>
+ <button data-a=FAST>faster +</button>
 </div>
-<div class=hint>hold to move · release = stop · arrows = drive+strafe · combine keys for diagonals
- · closing this tab stops the robot</div>
+<div class=hint>numpad 4/6 = rotate, arrows/a-s = strafe (works with NumLock on OR off) ·
+ hold to move, release = stop · combine keys for diagonals · closing this tab stops the robot</div>
 <script>
+// Map the PHYSICAL key (event.code) to an action, so numpad 4/6 rotate whether
+// NumLock is on or off (NumLock changes event.key: Numpad6 becomes ArrowRight).
+const CODE={
+ Numpad8:'FWD',Digit8:'FWD',ArrowUp:'FWD', Numpad2:'BACK',Digit2:'BACK',ArrowDown:'BACK',
+ Numpad4:'ROTL',Digit4:'ROTL', Numpad6:'ROTR',Digit6:'ROTR',
+ ArrowLeft:'STRL',KeyA:'STRL', ArrowRight:'STRR',KeyS:'STRR',
+ Space:'STOP',Numpad5:'STOP',Digit5:'STOP',
+ KeyI:'TILTUP',KeyM:'TILTDN',KeyJ:'PANL',KeyK:'PANR',
+ KeyH:'HOME',Numpad0:'SETHOME',Digit0:'SETHOME',
+ Minus:'SLOW',NumpadSubtract:'SLOW',Equal:'FAST',NumpadAdd:'FAST'};
+const MOVEACT=new Set(['FWD','BACK','ROTL','ROTR','STRL','STRR']);
 const held=new Set();
-const MOVE=new Set(['8','2','4','6','a','s','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']);
-const STOP=new Set([' ','5']);
-function vec(){ // held movement keys -> normalized {forward,strafe,turn}
- let f=0,st=0,t=0;
- if(held.has('8')||held.has('ArrowUp'))f+=1;
- if(held.has('2')||held.has('ArrowDown'))f-=1;
- if(held.has('a')||held.has('ArrowLeft'))st-=1;
- if(held.has('s')||held.has('ArrowRight'))st+=1;
- if(held.has('4'))t-=1;      // rotate left / CCW
- if(held.has('6'))t+=1;      // rotate right / CW
- return {f,st,t};
-}
-function hardStop(){        // panic stop: clear any stuck keys and stop, twice
- held.clear();moving=false;
- document.querySelectorAll('[data-k]').forEach(b=>b.classList.remove('on'));
- post('/api/stop');post('/api/stop');drv.textContent='STOP';
-}
+let moving=false;
+function vec(){let f=0,st=0,t=0;
+ if(held.has('FWD'))f+=1; if(held.has('BACK'))f-=1;
+ if(held.has('STRL'))st-=1; if(held.has('STRR'))st+=1;
+ if(held.has('ROTL'))t-=1; if(held.has('ROTR'))t+=1;   // -=CCW/left, +=CW/right
+ return {f,st,t};}
 async function post(url,body){try{return await(await fetch(url,{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})).json();}catch(e){}}
-let moving=false;
-async function tick(){const v=vec();
- if(v.f||v.st||v.t){moving=true;const r=await post('/api/drive',{forward:v.f,strafe:v.st,turn:v.t});
-   if(r)drv.textContent='drive';}
- else if(moving){moving=false;await post('/api/stop');drv.textContent='idle';}}
-setInterval(tick,100);
-async function servo(k){
- if(k==='i')show(await post('/api/servo',{tilt:+6}));
- else if(k==='m')show(await post('/api/servo',{tilt:-6}));
- else if(k==='j')show(await post('/api/servo',{pan:+6}));   // pan left
- else if(k==='k')show(await post('/api/servo',{pan:-6}));   // pan right
- else if(k==='h')show(await post('/api/home'));
- else if(k==='0')show(await post('/api/sethome'));
- else if(k==='+'||k==='=')show(await post('/api/speed',{delta:+10}));
- else if(k==='-')show(await post('/api/speed',{delta:-10}));
-}
 function show(s){if(!s)return; if(s.pan!=null)pan.textContent=Math.round(s.pan);
  if(s.tilt!=null)tlt.textContent=Math.round(s.tilt); if(s.speed!=null)spd.textContent=s.speed;}
-function press(k){
- if(STOP.has(k)){hardStop();return;}
- if(MOVE.has(k))held.add(k);else servo(k);
- document.querySelectorAll('[data-k]').forEach(b=>{if(b.dataset.k===k)b.classList.add('on');});}
-function release(k){held.delete(k);
- document.querySelectorAll('[data-k]').forEach(b=>{if(b.dataset.k===k)b.classList.remove('on');});
- if(!vec().f&&!vec().st&&!vec().t&&moving){moving=false;post('/api/stop');drv.textContent='idle';}}
-document.addEventListener('keydown',e=>{let k=e.key;if(MOVE.has(k)||STOP.has(k)||
- k.startsWith('Arrow'))e.preventDefault();if(!e.repeat)press(k);});
-document.addEventListener('keyup',e=>release(e.key));
-// on-screen buttons: press-and-hold
-document.querySelectorAll('[data-k]').forEach(b=>{const k=b.dataset.k;
- const dn=e=>{e.preventDefault();press(k);};const up=e=>{e.preventDefault();release(k);};
+function hardStop(){held.clear();moving=false;
+ document.querySelectorAll('[data-a]').forEach(b=>b.classList.remove('on'));
+ post('/api/stop');post('/api/stop');drv.textContent='STOP';}
+async function oneShot(a){
+ if(a==='TILTUP')show(await post('/api/servo',{tilt:+6}));
+ else if(a==='TILTDN')show(await post('/api/servo',{tilt:-6}));
+ else if(a==='PANL')show(await post('/api/servo',{pan:+6}));   // pan left
+ else if(a==='PANR')show(await post('/api/servo',{pan:-6}));   // pan right
+ else if(a==='HOME')show(await post('/api/home'));
+ else if(a==='SETHOME')show(await post('/api/sethome'));
+ else if(a==='FAST')show(await post('/api/speed',{delta:+10}));
+ else if(a==='SLOW')show(await post('/api/speed',{delta:-10}));}
+function pressA(a){if(!a)return;
+ if(a==='STOP'){hardStop();return;}
+ if(MOVEACT.has(a))held.add(a); else oneShot(a);
+ document.querySelectorAll('[data-a]').forEach(b=>{if(b.dataset.a===a)b.classList.add('on');});}
+function releaseA(a){if(!a)return; held.delete(a);
+ document.querySelectorAll('[data-a]').forEach(b=>{if(b.dataset.a===a)b.classList.remove('on');});
+ if(!held.size&&moving){moving=false;post('/api/stop');drv.textContent='idle';}}
+async function tick(){const v=vec();
+ if(v.f||v.st||v.t){moving=true;await post('/api/drive',{forward:v.f,strafe:v.st,turn:v.t});drv.textContent='drive';}
+ else if(moving){moving=false;await post('/api/stop');drv.textContent='idle';}}
+setInterval(tick,100);
+document.addEventListener('keydown',e=>{const a=CODE[e.code];if(a){e.preventDefault();if(!e.repeat)pressA(a);}});
+document.addEventListener('keyup',e=>{const a=CODE[e.code];if(a)releaseA(a);});
+document.querySelectorAll('[data-a]').forEach(b=>{const a=b.dataset.a;
+ const dn=e=>{e.preventDefault();pressA(a);};const up=e=>{e.preventDefault();releaseA(a);};
  b.addEventListener('mousedown',dn);b.addEventListener('mouseup',up);b.addEventListener('mouseleave',up);
  b.addEventListener('touchstart',dn,{passive:false});b.addEventListener('touchend',up,{passive:false});});
 window.addEventListener('blur',()=>{held.clear();post('/api/stop');});
 window.addEventListener('beforeunload',()=>{navigator.sendBeacon&&navigator.sendBeacon('/api/stop');});
-async function poll(){const s=await(await fetch('/api/state')).json();show(s);
- if(s.distance!=null)dst.textContent=s.distance;}
+// Video: poll single JPEGs instead of one long MJPEG stream, so a client
+// network blip just drops a frame (no wedged connection, no manual refresh).
+const view=document.getElementById('view');
+function nextFrame(){view.src='/snapshot.jpg?'+Date.now();}
+view.onload=()=>{rc.style.display='none';setTimeout(nextFrame,80);};   // ~12 fps
+view.onerror=()=>{rc.style.display='block';setTimeout(nextFrame,600);};
+nextFrame();
+async function poll(){try{const s=await(await fetch('/api/state')).json();show(s);
+ if(s.distance!=null)dst.textContent=s.distance;}catch(e){}}
 setInterval(poll,500);poll();
 </script></body></html>"""
 
@@ -346,6 +349,20 @@ def make_app(rc, frame_source=None):
     def state():
         return jsonify({"pan": rc.pan, "tilt": rc.tilt, "speed": rc.speed,
                         "distance": rc.distance_mm()})
+
+    @app.route("/snapshot.jpg")
+    def snapshot():
+        if frame_source is None:
+            return Response(status=503)
+        frame = frame_source()
+        if frame is None:
+            return Response(status=503)
+        import cv2
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ok:
+            return Response(status=503)
+        return Response(buf.tobytes(), mimetype="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
 
     @app.route("/stream.mjpg")
     def stream():

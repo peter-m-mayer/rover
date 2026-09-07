@@ -169,3 +169,19 @@ class TestApp:
     def test_stream_503_without_camera(self):
         client, c = self._client()          # made without a frame_source
         assert client.get("/stream.mjpg").status_code == 503
+
+    def test_snapshot_serves_jpeg(self):
+        pytest.importorskip("flask")
+        import numpy as np
+        from catchaser.rc import make_app
+        frame = np.full((48, 64, 3), 100, np.uint8)
+        client = make_app(rc(), frame_source=lambda: frame).test_client()
+        r = client.get("/snapshot.jpg")
+        assert r.status_code == 200 and r.mimetype == "image/jpeg"
+        assert r.data[:2] == b"\xff\xd8"      # JPEG magic
+
+    def test_snapshot_503_when_no_frame(self):
+        pytest.importorskip("flask")
+        from catchaser.rc import make_app
+        client = make_app(rc(), frame_source=lambda: None).test_client()
+        assert client.get("/snapshot.jpg").status_code == 503
