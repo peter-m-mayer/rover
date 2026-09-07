@@ -2,11 +2,13 @@
 
 ## The physical robot (Yahboom RASPBOT-V2)
 
-- **WiFi (untethered):** Pi 5 built-in WiFi on `LomasV_5G`, DHCP from the
-  TP-Link router — but **the lease moves between boots** (seen: `.35`, then
-  `.113` on 2026-09-06). Find it by ping-sweeping port 22 on `192.168.0.x`,
-  or fix it permanently with a **DHCP reservation** in the TP-Link admin page
-  (recommended; MAC is the wlan0 one).
+- **WiFi (untethered): `192.168.0.41` — STATIC, fixed.** Pi 5 built-in WiFi on
+  `LomasV_5G`, pinned Pi-side (`nmcli` manual 192.168.0.41/24, gw/dns
+  192.168.0.1, metric 600, autoconnect). No more lease drift — the OLED and
+  `ssh pi@192.168.0.41` agree every boot. (Earlier it roamed: `.27/.35/.113`.)
+  Undo: `sudo nmcli connection modify LomasV_5G ipv4.method auto`. Not a router
+  reservation (no TP-Link admin needed); wlan0 MAC `88:a2:9e:3f:96:80` if you
+  ever do reserve it there instead.
 - **Ethernet tether (static): `192.168.0.40`** — bound to the `Wired
   connection 1` profile (eth0 MAC `88:a2:9e:3f:96:7f`), `manual`
   192.168.0.40/24, gw/dns 192.168.0.1, route-metric 700 (so WiFi stays the
