@@ -101,9 +101,11 @@ class ChaseController:
                  use_pan: bool = config.CHASE_PAN_ENABLED,
                  pan_gain: float = config.CHASE_PAN_GAIN,
                  pan_sign: int = config.CHASE_PAN_SIGN,
-                 pan_follow_k: float = config.CHASE_PAN_FOLLOW_K,
-                 pan_deadband: float = config.CHASE_PAN_DEADBAND_DEG,
                  pan_turn_only_deg: float = config.CHASE_PAN_TURN_ONLY_DEG,
+                 pan_body_engage: float = config.CHASE_PAN_BODY_ENGAGE_DEG,
+                 pan_body_release: float = config.CHASE_PAN_BODY_RELEASE_DEG,
+                 pan_body_rotate: float = config.CHASE_PAN_BODY_ROTATE,
+                 pan_search_rotate: float = config.CHASE_PAN_SEARCH_ROTATE,
                  prey_dart_frames: int = config.CHASE_PREY_DART_FRAMES,
                  prey_freeze_frames: int = config.CHASE_PREY_FREEZE_FRAMES,
                  prey_dart_speed: float = config.CHASE_PREY_DART_SPEED,
@@ -129,9 +131,11 @@ class ChaseController:
         self.use_pan = use_pan
         self.pan_gain = pan_gain
         self.pan_sign = pan_sign
-        self.pan_follow_k = pan_follow_k
-        self.pan_deadband = pan_deadband
         self.pan_turn_only_deg = pan_turn_only_deg
+        self.pan_body_engage = pan_body_engage
+        self.pan_body_release = pan_body_release
+        self.pan_body_rotate = pan_body_rotate
+        self.pan_search_rotate = pan_search_rotate
         self.prey_dart_frames = max(1, int(prey_dart_frames))
         self.prey_freeze_frames = max(0, int(prey_freeze_frames))
         self.prey_dart_speed = prey_dart_speed
@@ -149,6 +153,7 @@ class ChaseController:
         self._last_seen_sign = 1.0   # default: search to the right first
         self._pan = float(config.SERVO_PAN_CENTER)
         self._prey_i = 0
+        self._body_rotating = False   # coarse-align hysteresis latch (pan mode)
 
     # ------------------------------------------------------------------ core
     def compute(self, detections: List[Detection], distance_mm: int,
@@ -196,15 +201,26 @@ class ChaseController:
         heading PID drives the body turn directly (pan stays None).
         """
         if self.use_pan:
+            # Fine tracking: the camera pans to keep the cat centered.
             self._pan = _clamp(
                 self._pan - self.pan_sign * self.pan_gain * err_eff,
                 config.SERVO_PAN_MIN, config.SERVO_PAN_MAX)
             dev = self._pan - config.SERVO_PAN_CENTER
-            if abs(dev) < self.pan_deadband:
-                turn = 0.0
+            # Coarse hand-off: the body sits still (camera does the work) until
+            # the pan swings out near the FOV edge, then slow-rotates to bring
+            # the camera back toward center — with hysteresis so it doesn't
+            # chatter around the threshold.
+            if self._body_rotating:
+                if abs(dev) <= self.pan_body_release:
+                    self._body_rotating = False
+            elif abs(dev) >= self.pan_body_engage:
+                self._body_rotating = True
+            if self._body_rotating:
+                # dev>0 => pan past center = camera left => body turns left.
+                turn = -self.pan_sign * (1.0 if dev > 0 else -1.0) * self.pan_body_rotate
+                turn = _clamp(turn, -self.turn_max, self.turn_max)
             else:
-                turn = _clamp(-self.pan_sign * self.pan_follow_k * dev,
-                              -self.turn_max, self.turn_max)
+                turn = 0.0
             return turn, self._pan
 
         # Body-only PID. The D-term needs two consecutive tracked frames — on a
@@ -281,12 +297,20 @@ class ChaseController:
         self._integral = 0.0
         self._prev_error = 0.0
         self._have_prev = False
+        self._body_rotating = False
         pan = None
         if self.use_pan:
+            # Recenter the camera so it looks where the body is turning.
             self._pan += _clamp(config.SERVO_PAN_CENTER - self._pan, -8.0, 8.0)
             pan = self._pan
         if self._frames_lost <= self.lost_grace_frames:
             return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold", pan=pan)
+        if self.use_pan:
+            # Slow, CONTINUOUS rotate toward the last-seen side to reacquire —
+            # no stop-and-go; the camera + detector tolerate the mild blur.
+            turn = self._last_seen_sign * self.pan_search_rotate
+            return DriveCommand(0.0, turn, STATE_SEARCHING, note="slow search", pan=pan)
+        # Body-only mode keeps the pulsed spin-and-stare (blur-safe without pan).
         cycle_pos = (self._frames_lost - self.lost_grace_frames - 1) % (
             self.search_spin_frames + self.search_stare_frames)
         if cycle_pos < self.search_spin_frames:

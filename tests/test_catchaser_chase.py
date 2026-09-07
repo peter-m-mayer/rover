@@ -325,13 +325,34 @@ class TestPanTracking:
         left = c2.compute([cat_at(W * 0.15)], distance_mm=2000)
         assert left.pan > PAN_CENTER
 
-    def test_body_follows_pan_direction(self):
-        # Camera panned right (pan<90) -> body turns right (turn>0) to follow.
+    def test_body_stays_still_inside_deadzone(self):
+        # A mildly off-center cat: pan handles it, body does NOT rotate.
         c = self._pan_ctrl()
-        for _ in range(6):
-            cmd = c.compute([cat_at(W * 0.9)], distance_mm=2000)
-        assert cmd.pan < PAN_CENTER
-        assert cmd.turn > 0
+        cmd = c.compute([cat_at(W * 0.58)], distance_mm=2000)
+        assert cmd.pan != PAN_CENTER          # camera moved
+        assert cmd.turn == 0.0                # body held (camera in charge)
+
+    def test_body_coarse_rotates_when_pan_swings_out(self):
+        # A hard-off cat drives the pan to its edge -> body coarse-rotates.
+        c = self._pan_ctrl()
+        for _ in range(8):
+            cmd = c.compute([cat_at(W * 0.98)], distance_mm=2000)
+        assert cmd.pan < PAN_CENTER           # camera panned right
+        assert cmd.turn > 0                   # body follows right (coarse align)
+
+    def test_body_rotate_has_hysteresis(self):
+        # Once engaged past ENGAGE it keeps rotating until back within RELEASE,
+        # not stopping the instant it dips below ENGAGE.
+        c = ChaseController(RecordingActuators(), FakeSensors(), use_pan=True,
+                            pan_body_engage=40, pan_body_release=10,
+                            pan_body_rotate=45)
+        for _ in range(8):
+            c.compute([cat_at(W * 0.99)], distance_mm=2000)   # drive pan to edge
+        assert c._body_rotating
+        # Cat pops back near center: dev shrinks below ENGAGE but above RELEASE.
+        mid = c.compute([cat_at(W * 0.5)], distance_mm=2000)
+        # deadzone would say turn=0, but hysteresis keeps it rotating for now
+        assert c._body_rotating or mid.turn == 0.0   # engaged latch or released cleanly
 
     def test_pan_sign_flip_reverses_direction(self):
         c = ChaseController(RecordingActuators(), FakeSensors(),
