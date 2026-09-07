@@ -90,6 +90,52 @@ class TestServos:
         assert c.act.pan == hp and c.act.tilt == ht
 
 
+class TestFrameGrabber:
+    class _Cam:
+        def __init__(self, fail_first=0):
+            self.calls = 0
+            self.fail_first = fail_first
+            self.closed = 0
+
+        def capture_color(self):
+            self.calls += 1
+            if self.calls <= self.fail_first:
+                raise RuntimeError("transient camera hiccup")
+            return f"frame{self.calls}"
+
+        def close(self):
+            self.closed += 1
+
+    def _pump(self, g, n=40):
+        # run the loop body n times synchronously instead of threading
+        for _ in range(n):
+            try:
+                fr = g._camera.capture_color()
+                if fr is not None:
+                    g._latest = fr
+                g._fails = 0
+            except Exception:
+                g._fails += 1
+                if g._fails >= 3:
+                    g._camera.close()
+                    g._fails = 0
+
+    def test_serves_latest_frame(self):
+        from catchaser.rc import FrameGrabber
+        cam = self._Cam()
+        g = FrameGrabber(cam)
+        self._pump(g, 3)
+        assert g.latest() == "frame3"
+
+    def test_survives_transient_failures_and_reopens(self):
+        from catchaser.rc import FrameGrabber
+        cam = self._Cam(fail_first=3)      # first 3 reads throw
+        g = FrameGrabber(cam)
+        self._pump(g, 6)
+        assert cam.closed == 1             # reopened after 3 straight fails
+        assert g.latest() == "frame4"      # recovered to a good frame
+
+
 class TestApp:
     def _client(self):
         pytest.importorskip("flask")

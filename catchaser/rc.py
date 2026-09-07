@@ -32,6 +32,55 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+class FrameGrabber:
+    """Continuously grab the newest camera frame in a background thread.
+
+    Decouples capture from the MJPEG stream so a transient camera read error
+    can't kill the stream (it just reuses the last good frame and retries), and
+    so multiple / reconnecting browser tabs all read one shared buffer instead
+    of fighting over the single VideoCapture. Reopens the camera on repeated
+    failure.
+    """
+
+    def __init__(self, camera, fps: float = 14.0):
+        self._camera = camera
+        self._period = 1.0 / fps
+        self._latest = None
+        self._lock = threading.Lock()
+        self._stop = False
+        self._fails = 0
+
+    def start(self):
+        threading.Thread(target=self._loop, daemon=True).start()
+        return self
+
+    def _loop(self):
+        while not self._stop:
+            try:
+                frame = self._camera.capture_color()
+                if frame is not None:
+                    with self._lock:
+                        self._latest = frame
+                    self._fails = 0
+            except Exception:
+                self._fails += 1
+                if self._fails >= 3:        # force a reopen on the next capture
+                    try:
+                        self._camera.close()
+                    except Exception:
+                        pass
+                    self._fails = 0
+                time.sleep(0.2)
+            time.sleep(self._period)
+
+    def latest(self):
+        with self._lock:
+            return self._latest
+
+    def stop(self):
+        self._stop = True
+
+
 class RCController:
     """Manual drive + camera control. Pure of I/O timing — unit-testable."""
 
@@ -147,7 +196,8 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
  .row button{flex:1}
  .hint{font-size:.68rem;color:#54644f;padding:6px 12px 20px;line-height:1.6}
 </style></head><body>
-<img id=view src="/stream.mjpg" alt="camera">
+<img id=view src="/stream.mjpg" alt="camera"
+ onerror="setTimeout(()=>{view.src='/stream.mjpg?'+Date.now()},800)">
 <div class=bar>speed <b id=spd>?</b> · pan <b id=pan>?</b> · tilt <b id=tlt>?</b>
   · dist <b id=dst>?</b>mm · <b id=drv>idle</b></div>
 <div class=pad>
@@ -288,9 +338,16 @@ def make_app(rc, frame_source=None):
         def gen():
             import cv2
             while True:
-                frame = frame_source()
-                ok, buf = cv2.imencode(".jpg", frame,
-                                       [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame = frame_source()          # newest buffered frame (or None)
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
+                try:
+                    ok, buf = cv2.imencode(".jpg", frame,
+                                           [cv2.IMWRITE_JPEG_QUALITY, 70])
+                except Exception:
+                    time.sleep(0.05)
+                    continue                    # never let one bad frame end the stream
                 if ok:
                     yield (b"--f\r\nContent-Type: image/jpeg\r\n\r\n"
                            + buf.tobytes() + b"\r\n")
@@ -318,7 +375,8 @@ def main(argv=None) -> int:
     rc = RCController(actuators, sensors, speed=args.speed)
     rc.load_home()
     rc.go_home()
-    app = make_app(rc, frame_source=camera.capture_color)
+    grabber = FrameGrabber(camera).start()
+    app = make_app(rc, frame_source=grabber.latest)
 
     # Dead-man watchdog: if the browser stops sending drive commands (closed
     # tab, dropped WiFi), stop the wheels.
