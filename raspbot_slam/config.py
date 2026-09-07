@@ -153,7 +153,9 @@ CAMERA_HEIGHT = 480
 # =============================================================================
 SERVO_PAN_ID = 1
 SERVO_TILT_ID = 2
-SERVO_PAN_CENTER = 90              # degrees
+SERVO_PAN_CENTER = 77             # measured mechanical forward for this unit
+                                  # (was a nominal 90; the pan mount sits ~13 deg
+                                  # off, confirmed by eye after re-seating a screw)
 SERVO_PAN_MIN = 0
 SERVO_PAN_MAX = 180
 SERVO_TILT_REST = 25               # degrees (slightly downward)

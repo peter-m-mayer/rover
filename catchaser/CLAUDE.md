@@ -161,8 +161,22 @@ period *remainder*, so the detector (~15 Hz) is the limiter. Higher loop rate
 - Run: `python3 -m catchaser.chase --pan --prey` (hardware) or
   `python3 -m catchaser.chase_sim --scenario approach --pan --prey --verbose`.
 
+**Pan servo verified on hardware (2026-09-07):** direction sign is the sim
+convention (pan > center = camera looks LEFT) → `CHASE_PAN_SIGN = +1` (default,
+confirmed by eye). Tilt works (higher = looks up). The pan mount sat ~13° off
+true-forward (mechanical slop, fixed by re-seating a screw), so
+`SERVO_PAN_CENTER` is now **77** (measured), not the nominal 90 — this is the
+body-follow target, so getting it right removes a steady-state heading bias.
+`python3 -m catchaser.pan_check` re-measures the sign anytime.
+**`--pan` is validated — safe to use.**
+
+**Phone aliases** (in the Pi's `~/.bashrc`; reconnect or `source ~/.bashrc`):
+`play` (prey + pan + harvest to a dated dataset), `playbody` (prey, no pan),
+`chaseonly` (plain chase + pan), `review` (triage newest dataset),
+`stats`, `bench`, `hellobot`, `catpull` (git pull).
+
 Still open, in rough value order:
-1. **Hardware servo-sign check** for pan (30 s wheels-off test).
+1. ~~Hardware servo-sign check for pan~~ — DONE (sign +1, center 77).
 2. Exposure control: shorter camera exposure (v4l2) to cut rotation blur.
 3. Centroid velocity prediction (lead pursuit) once tracking is stable.
 4. Pan *sweep* during SEARCH (park body, sweep camera) — bigger FOV, no blur.
