@@ -223,7 +223,8 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
  · closing this tab stops the robot</div>
 <script>
 const held=new Set();
-const MOVE=new Set(['8','2','4','6','a','s','ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','5']);
+const MOVE=new Set(['8','2','4','6','a','s','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']);
+const STOP=new Set([' ','5']);
 function vec(){ // held movement keys -> normalized {forward,strafe,turn}
  let f=0,st=0,t=0;
  if(held.has('8')||held.has('ArrowUp'))f+=1;
@@ -232,8 +233,12 @@ function vec(){ // held movement keys -> normalized {forward,strafe,turn}
  if(held.has('s')||held.has('ArrowRight'))st+=1;
  if(held.has('4'))t-=1;      // rotate left / CCW
  if(held.has('6'))t+=1;      // rotate right / CW
- if(held.has(' ')||held.has('5')){f=0;st=0;t=0;}
  return {f,st,t};
+}
+function hardStop(){        // panic stop: clear any stuck keys and stop, twice
+ held.clear();moving=false;
+ document.querySelectorAll('[data-k]').forEach(b=>b.classList.remove('on'));
+ post('/api/stop');post('/api/stop');drv.textContent='STOP';
 }
 async function post(url,body){try{return await(await fetch(url,{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})).json();}catch(e){}}
@@ -255,12 +260,15 @@ async function servo(k){
 }
 function show(s){if(!s)return; if(s.pan!=null)pan.textContent=Math.round(s.pan);
  if(s.tilt!=null)tlt.textContent=Math.round(s.tilt); if(s.speed!=null)spd.textContent=s.speed;}
-function press(k){if(MOVE.has(k))held.add(k);else servo(k);
+function press(k){
+ if(STOP.has(k)){hardStop();return;}
+ if(MOVE.has(k))held.add(k);else servo(k);
  document.querySelectorAll('[data-k]').forEach(b=>{if(b.dataset.k===k)b.classList.add('on');});}
 function release(k){held.delete(k);
- document.querySelectorAll('[data-k]').forEach(b=>{if(b.dataset.k===k)b.classList.remove('on');});}
-document.addEventListener('keydown',e=>{let k=e.key;if(k==='ArrowUp'||k==='ArrowDown'||
- k==='ArrowLeft'||k==='ArrowRight'||MOVE.has(k))e.preventDefault();press(k);});
+ document.querySelectorAll('[data-k]').forEach(b=>{if(b.dataset.k===k)b.classList.remove('on');});
+ if(!vec().f&&!vec().st&&!vec().t&&moving){moving=false;post('/api/stop');drv.textContent='idle';}}
+document.addEventListener('keydown',e=>{let k=e.key;if(MOVE.has(k)||STOP.has(k)||
+ k.startsWith('Arrow'))e.preventDefault();if(!e.repeat)press(k);});
 document.addEventListener('keyup',e=>release(e.key));
 // on-screen buttons: press-and-hold
 document.querySelectorAll('[data-k]').forEach(b=>{const k=b.dataset.k;

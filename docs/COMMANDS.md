@@ -107,7 +107,19 @@ python3 -m catchaser.hello                 # full smoke test (add --no-motion to
 python3 -m catchaser.benchmark             # detector Hz (add --camera for capture+detect)
 python3 -m catchaser.pan_check             # re-measure the pan servo direction sign
 i2cdetect -y 1                             # should show 0x2b (MCU) — needs i2c-tools
+
+# Wheels-off motor/mecanum diagnostic (watch the wheels):
+python3 -m catchaser.wheelcheck --describe # print the wheel pattern for each move
+python3 -m catchaser.wheelcheck --each     # spin motors 0,1,2,3 one at a time (verify IDs)
+python3 -m catchaser.wheelcheck --move strafe_right   # or rotate_right, forward, ...
+python3 -m catchaser.wheelcheck --all      # every primitive in sequence
 ```
+
+**Rotate vs. strafe** (they're different!): *rotate right* spins in place
+(left wheels forward, right wheels back = `+ + - -`); *strafe right* slides
+sideways (`+ - - +`, a diagonal the mecanum rollers turn into lateral motion).
+If strafe feels like a rotation/shuffle, the mecanum wheels are likely mounted
+wrong — from above the roller axes must form an **X**. Use `wheelcheck` to see.
 
 ---
 
