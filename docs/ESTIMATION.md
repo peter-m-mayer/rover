@@ -69,8 +69,12 @@ Track the cat in **absolute angular coordinates**, decoupled from the camera:
 
 ## Dependencies / caveats
 
-- **Tilt servo currently doesn't change the camera view** (mechanical) — blocks
-  Phase 3. Fix the mount first.
+- **Tilt servo is DEAD** (diagnosed 2026-09-09): commanded across its full
+  range (0/down ↔ 110/up) with no movement, while the pan servo sweeps
+  left/right cleanly and recenters — so it's the tilt servo/cable/horn, not the
+  shared servo power or MCU channel. Blocks Phase 3 (elevation). Fix = swap the
+  tilt servo (standard ~9g hobby servo on the tilt channel); pair it with the
+  IMU order. Horizontal (pan) tracking is unaffected.
 - **No IMU fitted** (I2C 0x69 empty). Recommended: Adafruit ICM-20948 — the
   driver (`raspbot_slam/imu.py`) already exists. Improves Phase 2; not required.
 - **Slop:** commanded pan/tilt ≠ true angle. Flow-correction of `theta_r` helps
