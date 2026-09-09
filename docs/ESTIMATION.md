@@ -69,14 +69,18 @@ Track the cat in **absolute angular coordinates**, decoupled from the camera:
 
 ## Dependencies / caveats
 
-- **Tilt: FIXED — was bent metal, servo is fine** (2026-09-09). The tilt mount
-  had bent metal jamming the servo (early sweeps showed no/tiny motion + stall
-  risk). After Peter straightened it, the servo sweeps freely and repeatably
-  (20+ full 0→110 cycles unloaded; observed travel ~80° for a 0-110 command —
-  normal servo under-travel, plenty for framing). **Still TODO once the camera
-  is reattached:** (1) verify the tilt *sign* (an early test read up↔down
-  inverted) with a gentle 65/35 test, (2) set the true `SERVO_TILT_REST` to
-  frame a floor-cat. Then Phase 3 (elevation tracking) is unblocked.
+- **Tilt: WORKING (stable band), elevation UNBLOCKED** (2026-09-09). Bent metal
+  was jamming it; after straightening, an *autonomous* camera diagnostic (hold
+  angle → burst-capture → measure frame-to-frame jitter) mapped the servo:
+  stable (jitter ~5-7) across **tilt 20-70**, but **chatters (~17-20, hunting)
+  at ≥75** — the top of travel = looking up at the ceiling, which floor-cat
+  chasing never needs. Likely a feedback-pot bad patch at the extreme from the
+  earlier stall abuse. Fix: clamp `SERVO_TILT_MIN/MAX = 20/70` so the servo
+  never enters the bad zone; `SERVO_TILT_REST = 45` frames the room+floor well.
+  Re-swept 20-70 to CONFIRM chatter-free (max jitter 6.9). Sign confirmed:
+  higher = up. Elevation tracking (Phase 3) is unblocked **without new parts**;
+  a replacement servo would only restore the unused look-up-high range.
+  Diagnostic scripts: `/tmp/tilt_diag.py`, `/tmp/tilt_confirm.py`.
 - **No IMU fitted** (I2C 0x69 empty). Recommended: Adafruit ICM-20948 — the
   driver (`raspbot_slam/imu.py`) already exists. Improves Phase 2; not required.
 - **Slop:** commanded pan/tilt ≠ true angle. Flow-correction of `theta_r` helps
