@@ -182,7 +182,9 @@ SERVO_PAN_CENTER = 73             # measured mechanical forward for this unit
                                   # a loose screw)
 SERVO_PAN_MIN = 0
 SERVO_PAN_MAX = 180
-SERVO_TILT_REST = 25               # degrees (slightly downward)
+SERVO_TILT_REST = 50               # degrees; raised from 25 (was aimed ~70% at
+                                   # the floor) so a cat out in the room sits
+                                   # nearer frame-center and is seen from farther
 SERVO_TILT_MIN = 0
 SERVO_TILT_MAX = 110               # hardware limit on servo 2
 SERVO_SETTLE_MS = 200              # wait after servo move
