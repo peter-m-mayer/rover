@@ -69,17 +69,14 @@ Track the cat in **absolute angular coordinates**, decoupled from the camera:
 
 ## Dependencies / caveats
 
-- **Tilt axis JAMMED (bent metal), not simply dead** (diagnosed 2026-09-09):
-  first sweeps showed no motion; a later sweep showed a *small* motion — and
-  Peter spotted **bent metal** on the tilt mount. So the servo is stalling
-  against a mechanical obstruction (small/inconsistent travel), which draws
-  stall current + heat (a brownout contributor) — do NOT keep commanding it to
-  extremes. Also **tilt direction may be inverted** (commanded up→down read as
-  down→up); re-verify the sign after the mechanics are fixed. Pan sweeps fine,
-  so it's isolated to the tilt linkage/servo. Fix (powered off): straighten the
-  bracket, check the horn screw/splines, reseat the 3-pin cable; swap the servo
-  if it cooked from stalling. Blocks Phase 3 (elevation). Pan tracking
-  unaffected.
+- **Tilt: FIXED — was bent metal, servo is fine** (2026-09-09). The tilt mount
+  had bent metal jamming the servo (early sweeps showed no/tiny motion + stall
+  risk). After Peter straightened it, the servo sweeps freely and repeatably
+  (20+ full 0→110 cycles unloaded; observed travel ~80° for a 0-110 command —
+  normal servo under-travel, plenty for framing). **Still TODO once the camera
+  is reattached:** (1) verify the tilt *sign* (an early test read up↔down
+  inverted) with a gentle 65/35 test, (2) set the true `SERVO_TILT_REST` to
+  frame a floor-cat. Then Phase 3 (elevation tracking) is unblocked.
 - **No IMU fitted** (I2C 0x69 empty). Recommended: Adafruit ICM-20948 — the
   driver (`raspbot_slam/imu.py`) already exists. Improves Phase 2; not required.
 - **Slop:** commanded pan/tilt ≠ true angle. Flow-correction of `theta_r` helps
