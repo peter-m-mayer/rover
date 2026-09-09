@@ -189,8 +189,11 @@ SERVO_TILT_REST = 45               # level-ish (frames the room + near floor for
 # travel, i.e. "looking up at the ceiling", which a floor-cat chase never
 # needs. Sign confirmed: higher tilt = up. Keep commands inside 20-70 so the
 # servo never enters the bad patch (also avoids the stall-current spikes).
-SERVO_TILT_MIN = 20
-SERVO_TILT_MAX = 70                # was 110; clamped below the chatter zone (~75+)
+SERVO_TILT_MIN = 25
+SERVO_TILT_MAX = 65                # margin: slow fine scans (2026-09-09) showed
+                                   # 25-65 dead-steady (jitter ~5-9); the very
+                                   # edges 20/68 blipped to ~10-12 on approach
+                                   # near the chatter onset, so keep off them.
 SERVO_SETTLE_MS = 200              # wait after servo move
 PAN_SWEEP_ANGLES = [30, 60, 90, 120, 150]
 

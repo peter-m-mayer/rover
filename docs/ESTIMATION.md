@@ -80,7 +80,16 @@ Track the cat in **absolute angular coordinates**, decoupled from the camera:
   Re-swept 20-70 to CONFIRM chatter-free (max jitter 6.9). Sign confirmed:
   higher = up. Elevation tracking (Phase 3) is unblocked **without new parts**;
   a replacement servo would only restore the unused look-up-high range.
-  Diagnostic scripts: `/tmp/tilt_diag.py`, `/tmp/tilt_confirm.py`.
+  Diagnostic scripts: `/tmp/tilt_diag.py`, `/tmp/tilt_confirm.py`,
+  `/tmp/tilt_scan.py`. Slow fine re-scan tightened the band to **25-65** (68
+  samples, all 4.6-12; edges 20/68 blipped to ~10-12 on approach → kept off).
+- **Idea (recenter the servo neutral):** the pot's bad patch is at a *physical*
+  extreme. Remounting the horn so the useful floor-cat aim (level/slightly
+  down) lands in the *middle* of the servo's electrical travel would give max
+  margin from the worn end. Worth doing when the **new camera (ETA +2 days,
+  ordered 2026-09-09)** goes on — do the mount fresh, center the neutral, and
+  re-run the autonomous diagnostic. A new USB camera improves imaging but does
+  NOT fix the tilt *servo*; confirm whether the order includes a pan/tilt kit.
 - **No IMU fitted** (I2C 0x69 empty). Recommended: Adafruit ICM-20948 — the
   driver (`raspbot_slam/imu.py`) already exists. Improves Phase 2; not required.
 - **Slop:** commanded pan/tilt ≠ true angle. Flow-correction of `theta_r` helps
