@@ -373,6 +373,31 @@ class TestPanTracking:
             assert cmd.state == STATE_LOST
         assert cmd.pan == held                               # held, not recentered
 
+    def test_pan_search_is_stop_start(self):
+        # Pan-mode search must pulse: rotate a few frames, STOP for sharp frames.
+        c = ChaseController(RecordingActuators(), FakeSensors(), use_pan=True,
+                            pan_stop_start=True, lost_grace_frames=1,
+                            search_spin_frames=2, search_stare_frames=3)
+        c.compute([cat_at(W * 0.9)], distance_mm=2000)   # seed last-seen side
+        pattern = []
+        for _ in range(1 + 10):                          # 1 grace frame + search
+            cmd = c.compute([], distance_mm=1000)
+            if cmd.state == STATE_SEARCHING:
+                pattern.append("spin" if cmd.turn != 0 else "stop")
+        assert pattern[:5] == ["spin", "spin", "stop", "stop", "stop"]
+        assert pattern[5:10] == ["spin", "spin", "stop", "stop", "stop"]  # repeats
+
+    def test_pan_coarse_align_is_stop_start(self):
+        # Body coarse-rotation (pan saturated) must also pulse for sharp frames.
+        c = ChaseController(RecordingActuators(), FakeSensors(), use_pan=True,
+                            pan_stop_start=True, search_spin_frames=2,
+                            search_stare_frames=3)
+        turns = []
+        for _ in range(12):
+            cmd = c.compute([cat_at(W * 0.99)], distance_mm=2000)  # hard off-axis
+            turns.append(cmd.turn)
+        assert any(t != 0 for t in turns) and any(t == 0 for t in turns)  # pulses
+
     def test_pan_recenters_when_lost(self):
         c = self._pan_ctrl()
         for _ in range(6):

@@ -150,8 +150,13 @@ CHASE_PAN_BODY_RELEASE_DEG = 14.0  # ...and keeps going until back within this
 # Halved twice (2026-09-07): coarse-align/search rotation was blurring frames
 # enough that the detector lost the cat mid-turn. Slower body rotate = less
 # motion blur (and less motor-stall current on carpet). Now ~1/4 the original.
-CHASE_PAN_BODY_ROTATE = 11         # slow, steady body-rotate speed while coarse-aligning
-CHASE_PAN_SEARCH_ROTATE = 10       # slow CONTINUOUS search rotate (pan mode; no stop-and-go)
+CHASE_PAN_BODY_ROTATE = 11         # body-rotate speed while coarse-aligning
+CHASE_PAN_SEARCH_ROTATE = 10       # body-rotate speed while searching (pan mode)
+# Stop-start rotation (pan mode): rotate for a couple frames, then STOP for a
+# few so the detector gets sharp (un-blurred) frames to recognize the cat in.
+# Continuous rotation blurs every frame and defeats recognition. Uses the
+# CHASE_SEARCH_SPIN_FRAMES / CHASE_SEARCH_STARE_FRAMES cadence below.
+CHASE_PAN_STOP_START = True
 
 # --- Prey / play mode (behavioral: dart, freeze, flee — what cats hunt) ------
 # Relentless smooth pursuit reads as boring or threatening. Prey darts and
