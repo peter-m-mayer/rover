@@ -182,11 +182,15 @@ SERVO_PAN_CENTER = 73             # measured mechanical forward for this unit
                                   # a loose screw)
 SERVO_PAN_MIN = 0
 SERVO_PAN_MAX = 180
-SERVO_TILT_REST = 50               # degrees; raised from 25 (was aimed ~70% at
-                                   # the floor) so a cat out in the room sits
-                                   # nearer frame-center and is seen from farther
-SERVO_TILT_MIN = 0
-SERVO_TILT_MAX = 110               # hardware limit on servo 2
+SERVO_TILT_REST = 45               # level-ish (frames the room + near floor for a cat)
+# Operational tilt band clamped to the CHATTER-FREE zone. Autonomous camera
+# diagnostic (2026-09-09): frame-to-frame jitter is ~5-7 (stable) for tilt
+# 20-70 but jumps to ~17-20 (servo hunting/chatter) at >=75 — the top of
+# travel, i.e. "looking up at the ceiling", which a floor-cat chase never
+# needs. Sign confirmed: higher tilt = up. Keep commands inside 20-70 so the
+# servo never enters the bad patch (also avoids the stall-current spikes).
+SERVO_TILT_MIN = 20
+SERVO_TILT_MAX = 70                # was 110; clamped below the chatter zone (~75+)
 SERVO_SETTLE_MS = 200              # wait after servo move
 PAN_SWEEP_ANGLES = [30, 60, 90, 120, 150]
 
