@@ -86,12 +86,16 @@ Track the cat in **absolute angular coordinates**, decoupled from the camera:
 - **Remount FLIPPED the zones** (2026-09-09, fine 2° map): the servo was
   reinstalled at a new neutral, which moved the worn-pot patch to *low*
   commands. Now **tilt 20-66 chatters** (jitter max 15-22, intermittent) and
-  **tilt 68-104 is dead-flat** (jitter 2.6). Re-clamped to **70-100, rest 85**.
-  BUT the camera view barely changes across 70-104 (little physical travel in
-  the stable zone; the real up/down sweep lives in the now-chattery 20-66) — so
-  tilt is a **fixed level framing** for now, not an active tracking axis.
-  Lesson: **the good zone moves with the horn — re-run the map after any
-  remount** (our earlier 25-65 clamp became wrong the instant it was remounted).
+  **tilt 68-104** looked dead-flat on short bursts — BUT a **sustained-hold
+  test** (2.5s/angle) then caught a slow **limit cycle**: 80-100 actually hunts
+  (jitter 2-4), only **72-76 is dead-still (0.26)**. Final clamp **72-78, rest
+  74**. The camera view barely changes across it (little quiet travel; the real
+  up/down sweep lives in the chattery 20-66) — so tilt is a **fixed level
+  framing**, not an active axis, until new hardware.
+  Lessons: **the good zone moves with the horn** (re-map after any remount —
+  our 25-65 clamp went bad the instant it was remounted), and **verify servo
+  stability with SUSTAINED holds, not short bursts** (bursts missed the limit
+  cycle that rcbot's continuous hold at 85 then exposed live).
 - **New camera ETA +2 days** (ordered 2026-09-09). A USB camera improves
   imaging but does NOT fix the tilt servo — confirm the order includes a
   pan/tilt kit if you want real elevation travel back. On install: mount fresh,

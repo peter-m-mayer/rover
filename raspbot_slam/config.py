@@ -182,18 +182,17 @@ SERVO_PAN_CENTER = 73             # measured mechanical forward for this unit
                                   # a loose screw)
 SERVO_PAN_MIN = 0
 SERVO_PAN_MAX = 180
-SERVO_TILT_REST = 85               # stable zone, frames the room level (see below)
-# Operational tilt band = the CHATTER-FREE zone AFTER the 2026-09-09 servo
-# remount. A fine 2-deg autonomous camera map (hold angle -> burst-photo ->
-# frame jitter) showed the remount MOVED the worn-pot patch: tilt 20-66 now
-# chatters (intermittent jitter spikes 15-22) and tilt 68-104 is dead-flat
-# (jitter 2.6). Clamp to 70-100. Caveat: the view barely changes across this
-# band (little physical travel here — the actual up/down sweep lives in the
-# now-chattery 20-66), so tilt is effectively a FIXED level framing for now;
-# active elevation tracking waits on the new camera/servo. Re-map after any
-# remount — the good zone moves with the horn.
-SERVO_TILT_MIN = 70
-SERVO_TILT_MAX = 100
+SERVO_TILT_REST = 74               # the dead-quiet sweet spot (see below)
+# Operational tilt band = the truly quiet zone found by a SUSTAINED-hold test
+# (2026-09-09). A short-burst map called 68-104 "flat", but holding each angle
+# 2.5s revealed a slow LIMIT CYCLE: tilt 72-76 is dead-still (jitter 0.26)
+# while 80-100 hunts (jitter 2-4, the oscillation Peter caught). So the real
+# quiet band is narrow, ~72-78; tilt is a FIXED level framing (~6 deg of quiet
+# travel). Active elevation tracking waits on the new camera/servo. Lesson:
+# verify servo stability with SUSTAINED holds, not short bursts. Re-map after
+# any remount / new hardware.
+SERVO_TILT_MIN = 72
+SERVO_TILT_MAX = 78
 SERVO_SETTLE_MS = 200              # wait after servo move
 PAN_SWEEP_ANGLES = [30, 60, 90, 120, 150]
 
