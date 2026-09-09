@@ -117,12 +117,15 @@ CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forw
 # brightness fixes that.
 CHASE_MIN_CONFIDENCE = 0.50        # ignore detections below this confidence
 
-# Fast shutter: short exposure kills motion blur; gain brightens the darker
-# frame. v4l2 units — measured range 10-626 (auto ~156). ON BY DEFAULT (blur
-# was the main tracking problem); disable per-run with --no-fast-shutter.
-CHASE_CAM_FAST_SHUTTER = True      # default-apply the short exposure on chase/rcbot
-CHASE_CAM_FAST_EXPOSURE = 78       # ~half the auto exposure
-CHASE_CAM_FAST_GAIN = 4            # of 1-8; offset the darker short-exposure image
+# Fast shutter + auto-brightness (ON by default; --no-fast-shutter for native
+# auto exposure). Keeps a SHORT exposure to kill motion blur and adapts GAIN to
+# reach a target brightness — only lengthening exposure in genuinely dim light.
+# v4l2 exposure units, measured range 10-626 (native auto ~156, often blown out).
+CHASE_CAM_FAST_SHUTTER = True      # default-apply adaptive short-exposure on chase/rcbot
+CHASE_CAM_FAST_EXPOSURE = 78       # the short exposure floor (~half native auto)
+CHASE_CAM_EXP_MAX = 220            # auto-brightness may lengthen up to here when dim
+CHASE_CAM_TARGET_BRIGHTNESS = 125  # mean frame brightness the auto-gain aims for
+CHASE_CAM_GAIN_MAX = 8             # sensor gain ceiling (of 1-8)
 CHASE_LOOP_HZ = 20                 # loop pacing cap; detector (~50 ms) is the
                                    # real limiter, so this yields ~9 Hz on Pi 5
 CHASE_APPROACH_TAPER_MM = 400      # start slowing this far beyond stop range

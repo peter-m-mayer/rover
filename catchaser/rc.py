@@ -84,6 +84,10 @@ class FrameGrabber:
             try:
                 frame = self._camera.capture_color()
                 if frame is not None:
+                    try:
+                        self._camera.auto_brightness(frame)  # adaptive exposure
+                    except Exception:
+                        pass
                     with self._lock:
                         self._latest = frame
                     self._fails = 0
@@ -448,8 +452,10 @@ def main(argv=None) -> int:
         return 2
 
     if args.fast_shutter:
-        camera.set_manual_exposure(config.CHASE_CAM_FAST_EXPOSURE,
-                                   config.CHASE_CAM_FAST_GAIN)
+        camera.enable_auto_brightness(
+            target=config.CHASE_CAM_TARGET_BRIGHTNESS,
+            exp_short=config.CHASE_CAM_FAST_EXPOSURE,
+            exp_max=config.CHASE_CAM_EXP_MAX, gain_max=config.CHASE_CAM_GAIN_MAX)
 
     rc = RCController(actuators, sensors, speed=args.speed)
     rc.load_home()

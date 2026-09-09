@@ -35,6 +35,7 @@ class Camera:
         self._cap = None
         self._exposure = None   # manual exposure (v4l2 exposure_time_absolute), None=auto
         self._gain = None       # manual gain to offset a short exposure
+        self._ab = None         # auto-brightness state (see enable_auto_brightness)
 
         # Calibration data (loaded from file or set manually)
         self._K = None              # 3x3 intrinsic matrix
@@ -82,6 +83,49 @@ class Camera:
         self._exposure = exposure
         self._gain = gain
         self._apply_exposure()
+
+    def enable_auto_brightness(self, target=125, exp_short=78, exp_max=220,
+                               gain_max=8, every=8):
+        """Adaptive exposure that keeps the shutter SHORT (sharp) and hits a
+        target brightness by adjusting GAIN first, only lengthening exposure
+        (accepting some blur) when gain is maxed in a genuinely dim scene.
+
+        Call auto_brightness(frame) periodically with captured frames; it
+        self-throttles to every `every` frames.
+        """
+        self._ab = dict(target=target, exp_short=exp_short, exp_max=exp_max,
+                        gain_max=gain_max, every=every, i=0)
+        self.set_manual_exposure(exp_short, 1)   # start short + low gain
+
+    def auto_brightness(self, frame):
+        """Nudge gain/exposure toward the target brightness (favoring short
+        exposure). No-op unless enable_auto_brightness() was called."""
+        ab = self._ab
+        if not ab:
+            return
+        ab["i"] += 1
+        if ab["i"] % ab["every"] != 0:
+            return
+        mean = float(np.asarray(frame).mean())
+        exp = self._exposure if self._exposure is not None else ab["exp_short"]
+        gain = self._gain if self._gain is not None else 1
+        if mean < ab["target"] - 12:                 # too dark -> brighten
+            if gain < ab["gain_max"]:
+                gain += 1
+            elif exp < ab["exp_max"]:
+                exp = min(ab["exp_max"], exp + 20)
+            else:
+                return
+        elif mean > ab["target"] + 12:               # too bright -> darken
+            if exp > ab["exp_short"]:                 # shorten shutter first
+                exp = max(ab["exp_short"], exp - 20)
+            elif gain > 1:
+                gain -= 1
+            else:
+                return
+        else:
+            return                                    # within deadband
+        self.set_manual_exposure(exp, gain)
 
     def _apply_exposure(self):
         """Push manual exposure/gain to the device via v4l2-ctl (best effort).

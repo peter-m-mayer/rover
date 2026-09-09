@@ -537,10 +537,13 @@ def main(argv=None) -> int:
         return 2
 
     if args.fast_shutter:
-        camera.set_manual_exposure(config.CHASE_CAM_FAST_EXPOSURE,
-                                   config.CHASE_CAM_FAST_GAIN)
-        print(f"[chase] fast shutter: exposure={config.CHASE_CAM_FAST_EXPOSURE} "
-              f"gain={config.CHASE_CAM_FAST_GAIN}")
+        camera.enable_auto_brightness(
+            target=config.CHASE_CAM_TARGET_BRIGHTNESS,
+            exp_short=config.CHASE_CAM_FAST_EXPOSURE,
+            exp_max=config.CHASE_CAM_EXP_MAX, gain_max=config.CHASE_CAM_GAIN_MAX)
+        print(f"[chase] fast shutter + auto-brightness "
+              f"(exposure>={config.CHASE_CAM_FAST_EXPOSURE}, "
+              f"target~{config.CHASE_CAM_TARGET_BRIGHTNESS})")
 
     detector = CatDetector()
     controller = ChaseController(
@@ -594,6 +597,7 @@ def main(argv=None) -> int:
 
     def perceive():
         frame = camera.capture_color()
+        camera.auto_brightness(frame)      # adaptive exposure/gain (no-op if off)
         dets = detector.detect(frame)
         maybe_harvest(frame, dets)
         return dets
