@@ -435,6 +435,8 @@ def main(argv=None) -> int:
     ap.add_argument("--speed", type=int, default=90)
     ap.add_argument("--deadman", type=float, default=0.6,
                     help="stop the wheels if no drive command for this long (s)")
+    ap.add_argument("--fast-shutter", action="store_true",
+                    help="short camera exposure + gain to cut motion blur")
     args = ap.parse_args(argv)
 
     from .hw import make_hardware
@@ -442,6 +444,10 @@ def main(argv=None) -> int:
     if bot is None:
         print("[rcbot] vendor driver not found — run on the robot.", file=sys.stderr)
         return 2
+
+    if args.fast_shutter:
+        camera.set_manual_exposure(config.CHASE_CAM_FAST_EXPOSURE,
+                                   config.CHASE_CAM_FAST_GAIN)
 
     rc = RCController(actuators, sensors, speed=args.speed)
     rc.load_home()

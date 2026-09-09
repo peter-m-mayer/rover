@@ -106,7 +106,9 @@ CHASE_SEARCH_SPIN_SPEED = 50       # in-place spin speed while hunting for a los
 # rotating, so alternate short spin bursts with stationary look frames.
 CHASE_SEARCH_SPIN_FRAMES = 2       # frames of spinning per search cycle
 CHASE_SEARCH_STARE_FRAMES = 3      # stationary detection frames per cycle
-CHASE_LOST_GRACE_FRAMES = 3        # hold position this many lost frames before search-spin
+CHASE_LOST_GRACE_FRAMES = 12       # hold (camera fixed where the cat was) this many lost
+                                   # frames before giving up to search — was 3, too twitchy:
+                                   # a few blurry/occluded frames dropped it straight to spin
 CHASE_CENTER_DEADBAND = 0.06       # |err| below this counts as centered (no turn)
 CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forward drive
 # 0.50 calibrated from floor-run snapshots (2026-09-06): every real-cat
@@ -114,6 +116,11 @@ CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forw
 # 0.41-0.45. Dim iPad-screen decoys can drop below 0.5 — max screen
 # brightness fixes that.
 CHASE_MIN_CONFIDENCE = 0.50        # ignore detections below this confidence
+
+# Fast-shutter preset (chase --fast-shutter): short exposure kills motion blur;
+# gain brightens the darker frame. v4l2 units — measured range 10-626 (auto ~156).
+CHASE_CAM_FAST_EXPOSURE = 78       # ~half the auto exposure
+CHASE_CAM_FAST_GAIN = 4            # of 1-8; offset the darker short-exposure image
 CHASE_LOOP_HZ = 20                 # loop pacing cap; detector (~50 ms) is the
                                    # real limiter, so this yields ~9 Hz on Pi 5
 CHASE_APPROACH_TAPER_MM = 400      # start slowing this far beyond stop range
@@ -135,11 +142,11 @@ CHASE_PAN_TURN_ONLY_DEG = 55.0     # if pan is past this, stop forward, let body
 # camera. Hysteresis (engage > release) stops the body from chattering.
 CHASE_PAN_BODY_ENGAGE_DEG = 42.0   # body starts coarse-rotating past this pan offset
 CHASE_PAN_BODY_RELEASE_DEG = 14.0  # ...and keeps going until back within this
-# Halved 2026-09-07: coarse-align/search rotation was blurring frames enough
-# that the detector lost the cat mid-turn. Slower body rotate = less motion
-# blur (and less motor-stall current on carpet). Tune further if still blurry.
-CHASE_PAN_BODY_ROTATE = 22         # slow, steady body-rotate speed while coarse-aligning
-CHASE_PAN_SEARCH_ROTATE = 20       # slow CONTINUOUS search rotate (pan mode; no stop-and-go)
+# Halved twice (2026-09-07): coarse-align/search rotation was blurring frames
+# enough that the detector lost the cat mid-turn. Slower body rotate = less
+# motion blur (and less motor-stall current on carpet). Now ~1/4 the original.
+CHASE_PAN_BODY_ROTATE = 11         # slow, steady body-rotate speed while coarse-aligning
+CHASE_PAN_SEARCH_ROTATE = 10       # slow CONTINUOUS search rotate (pan mode; no stop-and-go)
 
 # --- Prey / play mode (behavioral: dart, freeze, flee — what cats hunt) ------
 # Relentless smooth pursuit reads as boring or threatening. Prey darts and

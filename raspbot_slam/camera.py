@@ -33,6 +33,8 @@ class Camera:
         self._width = width or config.CAMERA_WIDTH
         self._height = height or config.CAMERA_HEIGHT
         self._cap = None
+        self._exposure = None   # manual exposure (v4l2 exposure_time_absolute), None=auto
+        self._gain = None       # manual gain to offset a short exposure
 
         # Calibration data (loaded from file or set manually)
         self._K = None              # 3x3 intrinsic matrix
@@ -64,6 +66,42 @@ class Camera:
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not self._cap.isOpened():
             raise RuntimeError(f"Failed to open camera device {self._device}")
+        self._apply_exposure()   # re-assert manual exposure after (re)open
+
+    def set_manual_exposure(self, exposure, gain=None):
+        """Fix the shutter time to cut motion blur.
+
+        Args:
+            exposure: v4l2 exposure_time_absolute (units ~100us; lower = shorter
+                shutter = less blur but darker). None reverts to auto.
+            gain: optional sensor gain (1-8) to brighten the darker short-exposure
+                image.
+
+        Sticky: re-applied automatically on every open()/reopen().
+        """
+        self._exposure = exposure
+        self._gain = gain
+        self._apply_exposure()
+
+    def _apply_exposure(self):
+        """Push manual exposure/gain to the device via v4l2-ctl (best effort).
+
+        Uses v4l2-ctl rather than OpenCV props — far more reliable on Pi UVC
+        cameras. Safe to call whether or not the device is open.
+        """
+        if self._exposure is None:
+            return
+        import subprocess
+        args = ["v4l2-ctl", "-d", f"/dev/video{self._device}",
+                "-c", "auto_exposure=1",
+                "-c", f"exposure_time_absolute={int(self._exposure)}"]
+        if self._gain is not None:
+            args += ["-c", f"gain={int(self._gain)}"]
+        try:
+            subprocess.run(args, timeout=2, check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     def close(self):
         """Release the camera device."""
@@ -96,6 +134,7 @@ class Camera:
                     if ok:
                         self._device = d
                         self._cap = cap
+                        self._apply_exposure()   # re-assert after re-enumeration
                         return True
                 cap.release()
             except Exception:

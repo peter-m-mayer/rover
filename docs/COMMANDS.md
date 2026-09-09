@@ -51,6 +51,7 @@ python3 -m catchaser.chase --forward-speed 0 --search-speed 0   # steer-only, wh
 |------|---------|
 | `--prey` | Dart / freeze / flee behavior (engaging). Off = steady pursuit. |
 | `--pan` | Camera pan tracking; body coarse-follows only near the FOV edge. |
+| `--fast-shutter` | Short camera exposure + gain to kill motion blur (in `play`). |
 | `--forward-speed N` | Base approach speed (0 = steer/spin only, no advance). |
 | `--search-speed N` | Spin speed when the cat is lost (0 = hold still). |
 | `--stop-mm N` | Ultrasonic hold distance (default 200). |

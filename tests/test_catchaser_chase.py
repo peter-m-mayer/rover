@@ -360,6 +360,19 @@ class TestPanTracking:
         right = c.compute([cat_at(W * 0.85)], distance_mm=2000)
         assert right.pan > PAN_CENTER          # flipped vs sign=+1
 
+    def test_pan_holds_where_cat_was_during_grace(self):
+        # Losing the cat briefly must NOT swing the camera back to center —
+        # it should stay pointed where the cat was, to reacquire instantly.
+        c = self._pan_ctrl(lost_grace_frames=10)
+        for _ in range(6):
+            c.compute([cat_at(W * 0.9)], distance_mm=2000)   # pan swings off-center
+        held = c._pan
+        assert abs(held - PAN_CENTER) > 5                    # camera is off-center
+        for _ in range(4):                                   # a few lost frames (< grace)
+            cmd = c.compute([], distance_mm=1000)
+            assert cmd.state == STATE_LOST
+        assert cmd.pan == held                               # held, not recentered
+
     def test_pan_recenters_when_lost(self):
         c = self._pan_ctrl()
         for _ in range(6):

@@ -298,13 +298,19 @@ class ChaseController:
         self._prev_error = 0.0
         self._have_prev = False
         self._body_rotating = False
+        # Grace period: the cat probably just blurred/occluded for a frame or
+        # two. HOLD everything — critically, keep the camera pointed where the
+        # cat was (do NOT recenter the pan), so it reacquires the instant the
+        # cat reappears instead of having looked away.
+        if self._frames_lost <= self.lost_grace_frames:
+            pan = self._pan if self.use_pan else None
+            return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold", pan=pan)
         pan = None
         if self.use_pan:
-            # Recenter the camera so it looks where the body is turning.
+            # Now actually searching: drift the camera back to center so it
+            # looks where the body is rotating.
             self._pan += _clamp(config.SERVO_PAN_CENTER - self._pan, -8.0, 8.0)
             pan = self._pan
-        if self._frames_lost <= self.lost_grace_frames:
-            return DriveCommand(0.0, 0.0, STATE_LOST, note="grace hold", pan=pan)
         if self.use_pan:
             # Slow, CONTINUOUS rotate toward the last-seen side to reacquire —
             # no stop-and-go; the camera + detector tolerate the mild blur.
@@ -508,6 +514,9 @@ def main(argv=None) -> int:
     parser.add_argument("--prey", action="store_true",
                         help="prey/play mode: dart, freeze, and flee instead of "
                              "steady pursuit (more engaging for the cat)")
+    parser.add_argument("--fast-shutter", action="store_true",
+                        help="short camera exposure + gain to cut motion blur "
+                             "(helps detection while the robot/cat is moving)")
     parser.add_argument("--quiet", action="store_true",
                         help="only print state changes, not every frame")
     parser.add_argument("--save-dir", default=None,
@@ -525,6 +534,12 @@ def main(argv=None) -> int:
         print("[chase] vendor driver not found — refusing to run the chase "
               "loop in mock mode (nothing would move). Run on the robot.")
         return 2
+
+    if args.fast_shutter:
+        camera.set_manual_exposure(config.CHASE_CAM_FAST_EXPOSURE,
+                                   config.CHASE_CAM_FAST_GAIN)
+        print(f"[chase] fast shutter: exposure={config.CHASE_CAM_FAST_EXPOSURE} "
+              f"gain={config.CHASE_CAM_FAST_GAIN}")
 
     detector = CatDetector()
     controller = ChaseController(
