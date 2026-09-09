@@ -435,8 +435,10 @@ def main(argv=None) -> int:
     ap.add_argument("--speed", type=int, default=90)
     ap.add_argument("--deadman", type=float, default=0.6,
                     help="stop the wheels if no drive command for this long (s)")
-    ap.add_argument("--fast-shutter", action="store_true",
-                    help="short camera exposure + gain to cut motion blur")
+    ap.add_argument("--fast-shutter", action=argparse.BooleanOptionalAction,
+                    default=config.CHASE_CAM_FAST_SHUTTER,
+                    help="short camera exposure + gain to cut motion blur "
+                         "(default ON; --no-fast-shutter for auto exposure)")
     args = ap.parse_args(argv)
 
     from .hw import make_hardware

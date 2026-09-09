@@ -117,8 +117,10 @@ CHASE_TURN_ONLY_ERROR = 0.5        # |err| at/above this: turn in place, no forw
 # brightness fixes that.
 CHASE_MIN_CONFIDENCE = 0.50        # ignore detections below this confidence
 
-# Fast-shutter preset (chase --fast-shutter): short exposure kills motion blur;
-# gain brightens the darker frame. v4l2 units — measured range 10-626 (auto ~156).
+# Fast shutter: short exposure kills motion blur; gain brightens the darker
+# frame. v4l2 units — measured range 10-626 (auto ~156). ON BY DEFAULT (blur
+# was the main tracking problem); disable per-run with --no-fast-shutter.
+CHASE_CAM_FAST_SHUTTER = True      # default-apply the short exposure on chase/rcbot
 CHASE_CAM_FAST_EXPOSURE = 78       # ~half the auto exposure
 CHASE_CAM_FAST_GAIN = 4            # of 1-8; offset the darker short-exposure image
 CHASE_LOOP_HZ = 20                 # loop pacing cap; detector (~50 ms) is the

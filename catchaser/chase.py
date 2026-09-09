@@ -514,9 +514,10 @@ def main(argv=None) -> int:
     parser.add_argument("--prey", action="store_true",
                         help="prey/play mode: dart, freeze, and flee instead of "
                              "steady pursuit (more engaging for the cat)")
-    parser.add_argument("--fast-shutter", action="store_true",
+    parser.add_argument("--fast-shutter", action=argparse.BooleanOptionalAction,
+                        default=config.CHASE_CAM_FAST_SHUTTER,
                         help="short camera exposure + gain to cut motion blur "
-                             "(helps detection while the robot/cat is moving)")
+                             "(default ON; --no-fast-shutter for auto exposure)")
     parser.add_argument("--quiet", action="store_true",
                         help="only print state changes, not every frame")
     parser.add_argument("--save-dir", default=None,
