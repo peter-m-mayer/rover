@@ -228,7 +228,8 @@ _PAGE = """<!doctype html><html><head><meta charset=utf-8>
  .bar b{color:var(--g)}
  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:420px;margin:10px auto;padding:0 10px}
  button{font-family:inherit;font-size:1rem;padding:16px 6px;border:1px solid #2c3f2a;border-radius:12px;
-   background:var(--panel);color:#e6ffe6;user-select:none}
+   background:var(--panel);color:#e6ffe6;user-select:none;touch-action:none}
+ html,body{overscroll-behavior:none;touch-action:manipulation}
  button:active,button.on{background:var(--g);color:#000;border-color:var(--g)}
  .stop{background:#3a0e14;border-color:#7a1f2b;color:#ff8ea0}
  .cam{background:#0e1622;border-color:#274}
@@ -316,7 +317,8 @@ document.addEventListener('keyup',e=>{const a=CODE[e.code];if(a)releaseA(a);});
 document.querySelectorAll('[data-a]').forEach(b=>{const a=b.dataset.a;
  const dn=e=>{e.preventDefault();pressA(a);};const up=e=>{e.preventDefault();releaseA(a);};
  b.addEventListener('mousedown',dn);b.addEventListener('mouseup',up);b.addEventListener('mouseleave',up);
- b.addEventListener('touchstart',dn,{passive:false});b.addEventListener('touchend',up,{passive:false});});
+ b.addEventListener('touchstart',dn,{passive:false});b.addEventListener('touchend',up,{passive:false});
+ b.addEventListener('touchcancel',up,{passive:false});});
 window.addEventListener('blur',()=>{held.clear();post('/api/stop');});
 window.addEventListener('beforeunload',()=>{navigator.sendBeacon&&navigator.sendBeacon('/api/stop');});
 // Video: poll single JPEGs instead of one long MJPEG stream, so a client
