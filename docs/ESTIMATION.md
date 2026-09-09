@@ -83,13 +83,19 @@ Track the cat in **absolute angular coordinates**, decoupled from the camera:
   Diagnostic scripts: `/tmp/tilt_diag.py`, `/tmp/tilt_confirm.py`,
   `/tmp/tilt_scan.py`. Slow fine re-scan tightened the band to **25-65** (68
   samples, all 4.6-12; edges 20/68 blipped to ~10-12 on approach → kept off).
-- **Idea (recenter the servo neutral):** the pot's bad patch is at a *physical*
-  extreme. Remounting the horn so the useful floor-cat aim (level/slightly
-  down) lands in the *middle* of the servo's electrical travel would give max
-  margin from the worn end. Worth doing when the **new camera (ETA +2 days,
-  ordered 2026-09-09)** goes on — do the mount fresh, center the neutral, and
-  re-run the autonomous diagnostic. A new USB camera improves imaging but does
-  NOT fix the tilt *servo*; confirm whether the order includes a pan/tilt kit.
+- **Remount FLIPPED the zones** (2026-09-09, fine 2° map): the servo was
+  reinstalled at a new neutral, which moved the worn-pot patch to *low*
+  commands. Now **tilt 20-66 chatters** (jitter max 15-22, intermittent) and
+  **tilt 68-104 is dead-flat** (jitter 2.6). Re-clamped to **70-100, rest 85**.
+  BUT the camera view barely changes across 70-104 (little physical travel in
+  the stable zone; the real up/down sweep lives in the now-chattery 20-66) — so
+  tilt is a **fixed level framing** for now, not an active tracking axis.
+  Lesson: **the good zone moves with the horn — re-run the map after any
+  remount** (our earlier 25-65 clamp became wrong the instant it was remounted).
+- **New camera ETA +2 days** (ordered 2026-09-09). A USB camera improves
+  imaging but does NOT fix the tilt servo — confirm the order includes a
+  pan/tilt kit if you want real elevation travel back. On install: mount fresh,
+  center the neutral so the useful aim is mid-travel, re-run `/tmp/tilt_map.py`.
 - **No IMU fitted** (I2C 0x69 empty). Recommended: Adafruit ICM-20948 — the
   driver (`raspbot_slam/imu.py`) already exists. Improves Phase 2; not required.
 - **Slop:** commanded pan/tilt ≠ true angle. Flow-correction of `theta_r` helps

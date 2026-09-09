@@ -182,18 +182,18 @@ SERVO_PAN_CENTER = 73             # measured mechanical forward for this unit
                                   # a loose screw)
 SERVO_PAN_MIN = 0
 SERVO_PAN_MAX = 180
-SERVO_TILT_REST = 45               # level-ish (frames the room + near floor for a cat)
-# Operational tilt band clamped to the CHATTER-FREE zone. Autonomous camera
-# diagnostic (2026-09-09): frame-to-frame jitter is ~5-7 (stable) for tilt
-# 20-70 but jumps to ~17-20 (servo hunting/chatter) at >=75 — the top of
-# travel, i.e. "looking up at the ceiling", which a floor-cat chase never
-# needs. Sign confirmed: higher tilt = up. Keep commands inside 20-70 so the
-# servo never enters the bad patch (also avoids the stall-current spikes).
-SERVO_TILT_MIN = 25
-SERVO_TILT_MAX = 65                # margin: slow fine scans (2026-09-09) showed
-                                   # 25-65 dead-steady (jitter ~5-9); the very
-                                   # edges 20/68 blipped to ~10-12 on approach
-                                   # near the chatter onset, so keep off them.
+SERVO_TILT_REST = 85               # stable zone, frames the room level (see below)
+# Operational tilt band = the CHATTER-FREE zone AFTER the 2026-09-09 servo
+# remount. A fine 2-deg autonomous camera map (hold angle -> burst-photo ->
+# frame jitter) showed the remount MOVED the worn-pot patch: tilt 20-66 now
+# chatters (intermittent jitter spikes 15-22) and tilt 68-104 is dead-flat
+# (jitter 2.6). Clamp to 70-100. Caveat: the view barely changes across this
+# band (little physical travel here — the actual up/down sweep lives in the
+# now-chattery 20-66), so tilt is effectively a FIXED level framing for now;
+# active elevation tracking waits on the new camera/servo. Re-map after any
+# remount — the good zone moves with the horn.
+SERVO_TILT_MIN = 70
+SERVO_TILT_MAX = 100
 SERVO_SETTLE_MS = 200              # wait after servo move
 PAN_SWEEP_ANGLES = [30, 60, 90, 120, 150]
 
