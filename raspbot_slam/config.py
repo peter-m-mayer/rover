@@ -105,7 +105,7 @@ CHASE_SEARCH_SPIN_SPEED = 50       # in-place spin speed while hunting for a los
 # fraction of the ~65 deg FOV per frame and motion blur kills detection while
 # rotating, so alternate short spin bursts with stationary look frames.
 CHASE_SEARCH_SPIN_FRAMES = 2       # frames of spinning per search cycle
-CHASE_SEARCH_STARE_FRAMES = 3      # stationary detection frames per cycle
+CHASE_SEARCH_STARE_FRAMES = 4      # stationary (sharp) detection frames per cycle
 CHASE_LOST_GRACE_FRAMES = 12       # hold (camera fixed where the cat was) this many lost
                                    # frames before giving up to search — was 3, too twitchy:
                                    # a few blurry/occluded frames dropped it straight to spin
@@ -150,13 +150,24 @@ CHASE_PAN_BODY_RELEASE_DEG = 14.0  # ...and keeps going until back within this
 # Halved twice (2026-09-07): coarse-align/search rotation was blurring frames
 # enough that the detector lost the cat mid-turn. Slower body rotate = less
 # motion blur (and less motor-stall current on carpet). Now ~1/4 the original.
-CHASE_PAN_BODY_ROTATE = 11         # body-rotate speed while coarse-aligning
-CHASE_PAN_SEARCH_ROTATE = 10       # body-rotate speed while searching (pan mode)
+CHASE_PAN_BODY_ROTATE = 60         # body-rotate speed while coarse-aligning
+CHASE_PAN_SEARCH_ROTATE = 60       # body-rotate speed while searching (pan mode)
+# Raised 10/11 -> 60 (2026-09-09): at ~10 the mecanum wheels couldn't overcome
+# carpet static friction, so a "spin" produced NO motion (stuck). Stop-start
+# means only the short spin bursts blur; the stare frames stay sharp for
+# recognition, so a higher spin speed is fine. Tune up if it still stalls.
 # Stop-start rotation (pan mode): rotate for a couple frames, then STOP for a
 # few so the detector gets sharp (un-blurred) frames to recognize the cat in.
 # Continuous rotation blurs every frame and defeats recognition. Uses the
 # CHASE_SEARCH_SPIN_FRAMES / CHASE_SEARCH_STARE_FRAMES cadence below.
 CHASE_PAN_STOP_START = True
+# Camera-based stall detection: during a spin burst the scene should shift a
+# lot; if the frame barely changes (< thresh) despite commanding a turn, the
+# wheels are stalled on the carpet -> ratchet the spin speed up (boost) until it
+# breaks free, capped at boost_max. Decays back when motion resumes.
+CHASE_STALL_MOTION_THRESH = 8.0    # mean frame abs-diff below this during a spin = stalled
+CHASE_SPIN_BOOST_STEP = 0.4        # boost increment per stalled spin frame
+CHASE_SPIN_BOOST_MAX = 2.6         # cap (x base rotate speed)
 
 # --- Prey / play mode (behavioral: dart, freeze, flee — what cats hunt) ------
 # Relentless smooth pursuit reads as boring or threatening. Prey darts and

@@ -157,6 +157,8 @@ class ChaseController:
         self._prey_i = 0
         self._body_rotating = False   # coarse-align hysteresis latch (pan mode)
         self._rot_i = 0               # stop-start rotation cycle counter
+        self._spin_boost = 1.0        # camera-stall speed boost (ratchets up if stuck)
+        self._last_was_spin = False   # did the last command intend body rotation?
 
     # ------------------------------------------------------------------ core
     def compute(self, detections: List[Detection], distance_mm: int,
@@ -172,6 +174,7 @@ class ChaseController:
         Returns:
             DriveCommand with forward/turn in motor units and a state label.
         """
+        self._last_was_spin = False   # set True below only when we emit a spin
         candidates = [d for d in detections if d.confidence >= self.min_confidence]
         # Chase the most confident cat. (Don't rely on input ordering — only
         # detector.detect() pre-sorts; other perception sources may not.)
@@ -220,15 +223,32 @@ class ChaseController:
                 self._body_rotating = True
             if self._body_rotating:
                 # dev>0 => pan past center = camera left => body turns left.
-                turn = -self.pan_sign * (1.0 if dev > 0 else -1.0) * self.pan_body_rotate
+                mag = self.pan_body_rotate * self._spin_boost   # stall boost
+                turn = -self.pan_sign * (1.0 if dev > 0 else -1.0) * mag
                 if self.pan_stop_start:
                     turn = self._pulsed(turn)   # rotate then STOP for a sharp frame
                 turn = _clamp(turn, -self.turn_max, self.turn_max)
+                self._last_was_spin = turn != 0
             else:
                 self._rot_i = 0                 # centered — reset the pulse cycle
                 turn = 0.0
             return turn, self._pan
         return self._body_pid(err_eff, dt)      # body-only mode: heading PID
+
+    def note_motion(self, moved: bool):
+        """Camera feedback: did the scene actually shift since the last frame?
+
+        The run loop calls this each frame with moved = (frame diff > threshold).
+        If we commanded a spin but nothing moved, the wheels are stalled on the
+        carpet -> ratchet the spin-speed boost up until it breaks free. Decay
+        back toward 1.0 once motion resumes.
+        """
+        if self._last_was_spin and not moved:
+            self._spin_boost = min(config.CHASE_SPIN_BOOST_MAX,
+                                   self._spin_boost + config.CHASE_SPIN_BOOST_STEP)
+        elif moved:
+            self._spin_boost = max(1.0,
+                                   self._spin_boost - config.CHASE_SPIN_BOOST_STEP / 2)
 
     def _pulsed(self, turn):
         """Stop-start rotation: emit `turn` for spin_frames, then 0 for
@@ -332,11 +352,16 @@ class ChaseController:
             # so the detector can actually recognize the cat mid-search.
             self._pan += _clamp(config.SERVO_PAN_CENTER - self._pan, -8.0, 8.0)
             pan = self._pan
+            mag = self.pan_search_rotate * self._spin_boost   # stall boost
             if self.pan_stop_start:
-                turn = self._pulsed(self._last_seen_sign * self.pan_search_rotate)
+                turn = self._pulsed(self._last_seen_sign * mag)
+                self._last_was_spin = turn != 0
                 note = "search spin" if turn else "search stare (sharp frame)"
+                if self._spin_boost > 1.0 and turn:
+                    note += " x%.1f" % self._spin_boost
                 return DriveCommand(0.0, turn, STATE_SEARCHING, note=note, pan=pan)
-            turn = self._last_seen_sign * self.pan_search_rotate
+            turn = self._last_seen_sign * mag
+            self._last_was_spin = True
             return DriveCommand(0.0, turn, STATE_SEARCHING, note="slow search", pan=pan)
         # Body-only mode: pulsed spin-and-stare (blur-safe without pan).
         cycle_pos = (self._frames_lost - self.lost_grace_frames - 1) % (
@@ -617,9 +642,20 @@ def main(argv=None) -> int:
         from .dataset import save_sample
         save_sample(args.save_dir, f"{run_tag}_{saver['n']:04d}", frame, dets)
 
+    import cv2
+    import numpy as np
+    prev_gray = {"g": None}
+
     def perceive():
         frame = camera.capture_color()
         camera.auto_brightness(frame)      # adaptive exposure/gain (no-op if off)
+        # Camera-based stall detection: did the scene shift since last frame?
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.int16)
+        if prev_gray["g"] is not None:
+            moved = float(np.mean(np.abs(gray - prev_gray["g"]))) > \
+                config.CHASE_STALL_MOTION_THRESH
+            controller.note_motion(moved)
+        prev_gray["g"] = gray
         dets = detector.detect(frame)
         maybe_harvest(frame, dets)
         return dets

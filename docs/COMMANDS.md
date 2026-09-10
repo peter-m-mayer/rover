@@ -34,7 +34,12 @@ Reload after changes with `source ~/.bashrc` (or just reconnect).
 | `hellobot` | Full hardware smoke test (LEDs, camera, ultrasonic, motion). |
 | `catpull` | `git pull` the latest code. |
 
-Stop any chase/play run: **Ctrl+C**, any **IR-remote key**, or pick the bot up.
+**Stop anything:** type **`stop`** (= `~/stop.sh`) — kills any running
+chase/play/rcbot and forces motors + LEDs off. Works however it was launched
+(foreground or background). Also: any **IR-remote key**, **lift the bot**, the
+**`--max-runtime`** limit, or **Ctrl+C** *if* it's running in the foreground of
+your terminal. Background runs (started with `&`/`nohup`) can't be Ctrl+C'd —
+use `stop`.
 
 ---
 

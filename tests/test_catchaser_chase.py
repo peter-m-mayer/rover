@@ -398,6 +398,40 @@ class TestPanTracking:
             turns.append(cmd.turn)
         assert any(t != 0 for t in turns) and any(t == 0 for t in turns)  # pulses
 
+    def test_stall_boost_ratchets_up_when_spinning_but_not_moving(self):
+        # Commanded a search spin but the scene isn't moving -> stalled -> boost.
+        c = ChaseController(RecordingActuators(), FakeSensors(), use_pan=True,
+                            lost_grace_frames=0, search_spin_frames=1,
+                            search_stare_frames=0)   # every search frame is a spin
+        c.compute([cat_at(W * 0.9)], distance_mm=2000)   # seed last-seen side
+        boosts = []
+        for _ in range(5):
+            cmd = c.compute([], distance_mm=1000)        # searching, spinning
+            assert c._last_was_spin                      # it intended to spin
+            c.note_motion(moved=False)                   # ...but nothing moved
+            boosts.append(c._spin_boost)
+        assert boosts[-1] > 1.0 and boosts == sorted(boosts)   # monotonically up
+        assert boosts[-1] <= config.CHASE_SPIN_BOOST_MAX
+
+    def test_stall_boost_decays_when_moving(self):
+        c = ChaseController(RecordingActuators(), FakeSensors(), use_pan=True,
+                            lost_grace_frames=0, search_spin_frames=1,
+                            search_stare_frames=0)
+        c.compute([cat_at(W * 0.9)], distance_mm=2000)
+        for _ in range(4):                               # stall -> boost climbs
+            c.compute([], distance_mm=1000); c.note_motion(False)
+        hi = c._spin_boost
+        for _ in range(6):                               # now it's moving
+            c.compute([], distance_mm=1000); c.note_motion(True)
+        assert c._spin_boost < hi                        # decayed back down
+
+    def test_boost_ignored_when_not_spinning(self):
+        # A no-motion report during centered tracking must NOT boost.
+        c = ChaseController(RecordingActuators(), FakeSensors(), use_pan=True)
+        c.compute([cat_at(W / 2)], distance_mm=2000)     # centered, no spin
+        c.note_motion(moved=False)
+        assert c._spin_boost == 1.0
+
     def test_pan_recenters_when_lost(self):
         c = self._pan_ctrl()
         for _ in range(6):
