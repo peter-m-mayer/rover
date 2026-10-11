@@ -43,6 +43,10 @@ class Camera:
         self._new_K = None          # optimal new camera matrix for undistortion
 
         cal_file = calibration_file or config.CAMERA_CALIBRATION_FILE
+        if not os.path.isabs(cal_file) and not os.path.exists(cal_file):
+            # config paths are relative to the raspbot_slam package, where
+            # calibration/camera_calibrate.py saves (not to the CWD)
+            cal_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), cal_file)
         if os.path.exists(cal_file):
             self._load_calibration(cal_file)
         else:

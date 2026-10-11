@@ -1,5 +1,5 @@
 """
-ICM-20948 9-DOF IMU interface with orientation estimation.
+9-DOF IMU interface (LSM9DS1 or ICM-20948) with orientation estimation.
 
 Provides gyroscope (angular velocity), accelerometer (linear acceleration),
 and magnetometer (compass heading) data. Includes a complementary filter
@@ -11,8 +11,16 @@ This is an OPTIONAL upgrade -- the SLAM system works without it, but gains:
 - Dead reckoning between camera frames
 - Absolute heading from magnetometer (no drift)
 
-Hardware: Adafruit ICM-20948 breakout on I2C bus, address 0x69.
-Install: sudo pip3 install adafruit-circuitpython-icm20x
+Hardware (auto-detected, in config.IMU_BACKEND order):
+- Adafruit LSM9DS1 (fitted 2026-10): own I2C bus config.IMU_I2C_BUS (Pi 5
+  i2c3, GPIO22/23), 0x6B + 0x1E. Driver: lsm9ds1.py (smbus2, no extra deps).
+  Wiring + bring-up: docs/IMU_LSM9DS1.html; verify with catchaser.imu_check.
+- Adafruit ICM-20948 at 0x69.
+  Install: sudo pip3 install adafruit-circuitpython-icm20x
+
+Sensor axes are rotated into the ROBOT frame (x forward, y left, z up) by
+config.IMU_AXIS_MAP, so gyro_z > 0 is a CCW (left) turn whatever way the board
+is mounted. catchaser.imu_check measures the map.
 
 Usage:
     imu = IMU()               # auto-detects hardware
@@ -61,6 +69,26 @@ IMU_ACCEL_NOISE_M = 0.05            # accelerometer noise (m/s²)
 IMU_MAG_NOISE_RAD = 0.05            # magnetometer heading noise (rad)
 
 
+def axis_map_matrix(axis_map) -> np.ndarray:
+    """3x3 sensor->robot rotation from e.g. ("+y", "-x", "+z"): robot x is
+    sensor +y, robot y is sensor -x, robot z is sensor +z."""
+    m = np.zeros((3, 3))
+    for row, spec in enumerate(axis_map):
+        m[row, "xyz".index(spec[1])] = -1.0 if spec[0] == "-" else 1.0
+    if abs(abs(np.linalg.det(m)) - 1.0) > 1e-9:
+        raise ValueError(f"IMU_AXIS_MAP {axis_map} is not a permutation")
+    if np.linalg.det(m) < 0:
+        raise ValueError(f"IMU_AXIS_MAP {axis_map} is a reflection, not a "
+                         f"rotation (left-handed) — a sign is wrong")
+    return m
+
+
+def to_robot_frame(v, axis_map=None) -> Tuple[float, float, float]:
+    """Sensor-frame vector -> robot frame (x forward, y left, z up)."""
+    axis_map = axis_map or getattr(config, "IMU_AXIS_MAP", ("+x", "+y", "+z"))
+    return tuple(axis_map_matrix(axis_map) @ np.asarray(v, float))
+
+
 @dataclass
 class IMUReading:
     """Single timestamped IMU reading with all 9 axes."""
@@ -86,6 +114,7 @@ class IMU:
         """
         self._mock_mode = mock_mode
         self._icm = None
+        self.model = "mock" if mock_mode else None
         self._available = False
         self._running = False
         self._thread = None
@@ -112,18 +141,31 @@ class IMU:
 
         if not mock_mode:
             self._try_init_hardware()
+            self.load_calibration()
 
     def _try_init_hardware(self):
-        """Attempt to initialize the ICM-20948 over I2C."""
-        if not _HAS_HARDWARE:
-            return
-        try:
-            i2c = board.I2C()
-            self._icm = adafruit_icm20x.ICM20948(i2c)
-            self._available = True
-        except Exception:
-            self._icm = None
-            self._available = False
+        """Find an IMU: config.IMU_BACKEND is 'auto' (LSM9DS1, then
+        ICM-20948), 'lsm9ds1', 'icm20948' or 'none'."""
+        backend = getattr(config, "IMU_BACKEND", "auto")
+        if backend in ("auto", "lsm9ds1"):
+            try:
+                from .lsm9ds1 import LSM9DS1
+                self._icm = LSM9DS1(bus=getattr(config, "IMU_I2C_BUS", 3))
+                self.model = "LSM9DS1"
+                self._available = True
+                return
+            except Exception:
+                self._icm = None
+        if backend in ("auto", "icm20948") and _HAS_HARDWARE:
+            try:
+                i2c = board.I2C()
+                self._icm = adafruit_icm20x.ICM20948(i2c)
+                self.model = "ICM-20948"
+                self._available = True
+                return
+            except Exception:
+                self._icm = None
+        self._available = False
 
     @property
     def is_available(self) -> bool:
@@ -213,6 +255,34 @@ class IMU:
             print(f"  Soft-iron scale:  ({self._mag_scale[0]:.3f}, "
                   f"{self._mag_scale[1]:.3f}, {self._mag_scale[2]:.3f})")
 
+    @staticmethod
+    def calibration_path() -> str:
+        import os
+        return os.path.join(os.path.dirname(__file__),
+                            getattr(config, "IMU_CALIBRATION_FILE",
+                                    "calibration/imu_calibration.json"))
+
+    def save_calibration(self, path: str = None, **extra):
+        """Persist the magnetometer hard/soft-iron calibration (the gyro bias
+        drifts with temperature, so it is re-measured at every start)."""
+        import json
+        data = dict(model=self.model, mag_offset=list(map(float, self._mag_offset)),
+                    mag_scale=list(map(float, self._mag_scale)),
+                    saved=time.strftime("%Y-%m-%d %H:%M"), **extra)
+        with open(path or self.calibration_path(), "w") as f:
+            json.dump(data, f, indent=1)
+
+    def load_calibration(self, path: str = None) -> bool:
+        import json
+        try:
+            with open(path or self.calibration_path()) as f:
+                data = json.load(f)
+            self._mag_offset = np.array(data["mag_offset"], float)
+            self._mag_scale = np.array(data["mag_scale"], float)
+            return True
+        except (OSError, KeyError, ValueError):
+            return False
+
     # =========================================================================
     # Reading
     # =========================================================================
@@ -242,8 +312,12 @@ class IMU:
             self._mag_raw = (mag - self._mag_offset) * self._mag_scale
 
             # Compute magnetometer heading (atan2 of X, Y in horizontal plane)
-            # Assumes IMU is roughly level (valid for ground robot)
-            self._mag_heading = math.atan2(self._mag_raw[1], self._mag_raw[0])
+            # Assumes IMU is roughly level (valid for ground robot). A fixed
+            # world field seen from a robot turned CCW by psi has body
+            # components (B cos psi, -B sin psi), so heading = atan2(-my, mx)
+            # (CCW-positive, same sense as the integrated gyro_z). The old
+            # atan2(my, mx) ran BACKWARDS against the gyro.
+            self._mag_heading = math.atan2(-self._mag_raw[1], self._mag_raw[0])
             self._mag_heading += math.radians(IMU_MAG_DECLINATION_DEG)
             self._mag_heading = self._normalize_angle(self._mag_heading)
 
@@ -278,9 +352,9 @@ class IMU:
             mag = self._icm.magnetic         # (mx, my, mz) in uT
             return IMUReading(
                 timestamp=time.time(),
-                accel=accel,
-                gyro=gyro,
-                mag=mag,
+                accel=to_robot_frame(accel),
+                gyro=to_robot_frame(gyro),
+                mag=to_robot_frame(mag),
             )
         except Exception:
             return IMUReading(

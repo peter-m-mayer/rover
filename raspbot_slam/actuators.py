@@ -10,6 +10,14 @@ import time
 
 from . import config
 
+MCU_REG_MOTOR = 0x01
+MCU_REG_SERVO = 0x02
+I2C_RETRIES = 4
+
+
+class I2CWriteError(OSError):
+    """A command never reached the Yahboom MCU, even after retries."""
+
 
 class Actuators:
     """Motor, servo, and LED control for the RASPBOT-V2."""
@@ -23,6 +31,32 @@ class Actuators:
         self._bot = bot
         self._pan_angle = config.SERVO_PAN_CENTER
         self._tilt_angle = config.SERVO_TILT_REST
+        self.i2c_retries = 0        # writes that needed a retry (diagnostics)
+
+    def _write(self, reg, data) -> bool:
+        """Write a command to the MCU, retrying on I2C errors.
+
+        The vendor library catches every I2C error, prints it and carries on,
+        so a dropped "stop" left the motors running (seen 2026-10-11: a 10 deg
+        turn became 43 deg). Writing the register directly lets us retry and,
+        if the bus stays down, raise instead of failing silently.
+
+        Returns False when the driver doesn't expose its bus (caller falls
+        back to the vendor call); raises I2CWriteError if all retries fail.
+        """
+        dev = getattr(self._bot, "_device", None)
+        addr = getattr(self._bot, "_addr", None)
+        if dev is None or addr is None:
+            return False
+        for attempt in range(I2C_RETRIES):
+            try:
+                dev.write_i2c_block_data(addr, reg, [int(v) for v in data])
+                return True
+            except OSError as exc:
+                self.i2c_retries += 1
+                last = exc
+                time.sleep(0.002 * (attempt + 1))
+        raise I2CWriteError(f"MCU reg 0x{reg:02x} {list(data)}: {last}")
 
     # =========================================================================
     # Servo Control
@@ -37,7 +71,8 @@ class Actuators:
         angle_deg = max(config.SERVO_PAN_MIN, min(config.SERVO_PAN_MAX, angle_deg))
         self._pan_angle = angle_deg
         if self._bot is not None:
-            self._bot.Ctrl_Servo(config.SERVO_PAN_ID, int(angle_deg))
+            if not self._write(MCU_REG_SERVO, (config.SERVO_PAN_ID, int(angle_deg))):
+                self._bot.Ctrl_Servo(config.SERVO_PAN_ID, int(angle_deg))
 
     def set_servo_tilt(self, angle_deg: float):
         """Set camera tilt servo angle.
@@ -48,7 +83,8 @@ class Actuators:
         angle_deg = max(config.SERVO_TILT_MIN, min(config.SERVO_TILT_MAX, angle_deg))
         self._tilt_angle = angle_deg
         if self._bot is not None:
-            self._bot.Ctrl_Servo(config.SERVO_TILT_ID, int(angle_deg))
+            if not self._write(MCU_REG_SERVO, (config.SERVO_TILT_ID, int(angle_deg))):
+                self._bot.Ctrl_Servo(config.SERVO_TILT_ID, int(angle_deg))
 
     def center_camera(self):
         """Return camera to center pan and rest tilt."""
@@ -77,10 +113,12 @@ class Actuators:
             return max(-config.MOTOR_SPEED_MAX, min(config.MOTOR_SPEED_MAX, int(v)))
 
         if self._bot is not None:
-            self._bot.Ctrl_Muto(config.MOTOR_L1_ID, clamp(l1))
-            self._bot.Ctrl_Muto(config.MOTOR_L2_ID, clamp(l2))
-            self._bot.Ctrl_Muto(config.MOTOR_R1_ID, clamp(r1))
-            self._bot.Ctrl_Muto(config.MOTOR_R2_ID, clamp(r2))
+            for motor_id, v in ((config.MOTOR_L1_ID, l1), (config.MOTOR_L2_ID, l2),
+                                (config.MOTOR_R1_ID, r1), (config.MOTOR_R2_ID, r2)):
+                v = clamp(v)
+                # MCU format (as Raspbot_Lib.Ctrl_Muto): [id, dir (1 = reverse), |speed|]
+                if not self._write(MCU_REG_MOTOR, (motor_id, 1 if v < 0 else 0, abs(v))):
+                    self._bot.Ctrl_Muto(motor_id, v)
 
     def move_forward(self, speed: int):
         """Drive forward. Speed 0-255."""
@@ -146,8 +184,11 @@ class Actuators:
         self._set_motors(l1, l2, r1, r2)
 
     def stop(self):
-        """Stop all motors immediately."""
-        self._set_motors(0, 0, 0, 0)
+        """Stop all motors immediately (sent twice: a lost stop is the dangerous one)."""
+        try:
+            self._set_motors(0, 0, 0, 0)
+        finally:
+            self._set_motors(0, 0, 0, 0)
 
     def strafe_right_timed(self, speed: int, duration_s: float):
         """Strafe right for a fixed duration, then stop.

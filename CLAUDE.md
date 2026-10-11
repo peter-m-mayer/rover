@@ -34,6 +34,20 @@
   board qualifies).
 - **Spare rescue SD card** exists in the drawer: RPi OS 2024-07-04, SSH
   pre-enabled, I2C already configured. Use it if the primary card gets wedged.
+- **Boot card replaced 2026-10-11.** The old root was a microSD in a cheap USB
+  reader that flipped bits (corrupt wheels, inconsistent reads). It's archived
+  as "old, flaky", so don't reuse it. The Pi now boots a fresh Bookworm
+  (2026-09-15 arm64) from a SanDisk Ultra 64 GB in its **built-in slot**.
+  Rebuilt from `catChaser/pi_backup_2026-10-10/`:
+  - static IPs as above
+  - pip pins (numpy 1.26.4, opencv-headless 4.11.0.86, onnxruntime 1.18.1, scipy 1.14.0)
+  - Raspbot_Lib
+  - OLED and app autostart; `reservo.py` now rests the servos at pan 74 / tilt 34
+  - `.bashrc` aliases and the phone scripts
+  - datasets
+
+  The Yahboom tutorials, Jupyter and the ROS 2 Docker image were not restored.
+  The camera is the **USB** camera (`/dev/video0`), not CSI, so `rpicam-*` reports "no cameras".
 
 ## Hardware I2C sanity check
 
@@ -43,8 +57,23 @@ If the vendor driver ever fails to connect, verify the MCU is on the bus:
 i2cdetect -y 1      # should show 0x2b (the RASPBOT-V2 MCU)
 ```
 
-No `0x2b` → hardware/I2C problem, not a software bug. (Optional IMU, if fitted,
-appears at `0x69`.)
+No `0x2b` → hardware/I2C problem, not a software bug. The OLED is `0x3c`. The
+LSM9DS1 IMU is on its own bus, **i2c-3** (GPIO22/23, `dtoverlay=i2c3-pi5,pins_22_23`):
+`i2cdetect -y 3` should show `0x1e` (magnetometer) and `0x6b` (accel/gyro).
+
+## Gotchas found 2026-10-11
+
+- **The vendor `Raspbot_Lib` swallows I2C write errors** (prints and returns). A
+  dropped motor "stop" left the robot turning. `Actuators` now writes the MCU
+  registers directly with retries and raises `I2CWriteError`. Don't call
+  `bot.Ctrl_Muto`/`Ctrl_Servo` directly in new code.
+- **`pkill -f <pattern>` over SSH kills its own shell** when the pattern appears in
+  the command line. Use a bracket pattern: `pkill -f "[a]uto_camera_cal"`.
+- **OpenCV 5 on the PC vs 4.11 on the Pi:** `findChessboardCorners` returns (N, 2)
+  vs (N, 1, 2), and `calcBackProject` returned zeros on 5. Reshape explicitly, and
+  use numpy for histogram lookups.
+- **`CALIB_CB_FAST_CHECK` rejected every view** of the printed board on this camera.
+  Don't use it.
 
 ## Vendor driver (not in git)
 

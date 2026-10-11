@@ -41,3 +41,6 @@ raspbot_slam/maps/*/trajectory.npy
 
 # Calibration images (if any)
 calibration_images/
+
+# Recorded runs, harvested chase frames, calibration captures (large; live on the Pi / PC)
+datasets/

@@ -192,23 +192,27 @@ CAMERA_HEIGHT = 480
 # =============================================================================
 SERVO_PAN_ID = 1
 SERVO_TILT_ID = 2
-SERVO_PAN_CENTER = 73             # measured mechanical forward for this unit
-                                  # (nominal 90; the pan mount sits ~17 deg off,
-                                  # confirmed dead-ahead by eye after re-seating
-                                  # a loose screw)
+SERVO_PAN_CENTER = 74             # auto-zeroed 2026-10-10 (catchaser.camera_zero:
+                                  # floor-line vanishing point, robot squared to a
+                                  # ruler on plank flooring). 74 -> VP 0.4-0.7 deg
+                                  # off, 75 overshoots. Pan has 3-6 deg of SLACK
+                                  # (lands differently from left vs right); the
+                                  # zero holds to +/-0.5 px when approached from
+                                  # BELOW, so approach center from below.
 SERVO_PAN_MIN = 0
 SERVO_PAN_MAX = 180
-SERVO_TILT_REST = 74               # the dead-quiet sweet spot (see below)
-# Operational tilt band = the truly quiet zone found by a SUSTAINED-hold test
-# (2026-09-09). A short-burst map called 68-104 "flat", but holding each angle
-# 2.5s revealed a slow LIMIT CYCLE: tilt 72-76 is dead-still (jitter 0.26)
-# while 80-100 hunts (jitter 2-4, the oscillation Peter caught). So the real
-# quiet band is narrow, ~72-78; tilt is a FIXED level framing (~6 deg of quiet
-# travel). Active elevation tracking waits on the new camera/servo. Lesson:
-# verify servo stability with SUSTAINED holds, not short bursts. Re-map after
-# any remount / new hardware.
-SERVO_TILT_MIN = 72
-SERVO_TILT_MAX = 78
+SERVO_TILT_LEVEL = 30             # optical axis ~level (provisional, see below)
+SERVO_TILT_REST = 34               # a touch above level: room + floor in frame
+# NEW tilt servo (2026-10-10), mapped by catchaser.servo_map: smooth and linear
+# from cmd 2 up to ~118 (~7.4 px per cmd), hold jitter <0.3 px, direction
+# hysteresis a consistent ~0.75 deg. Higher = looks UP. A HARD STOP near
+# 122-124 (image stops moving): never command above ~118 or it stalls. Level
+# sits low in travel (~30 cmd of look-down, ~85 of look-up). LEVEL is
+# provisional: the FOE drive (catchaser.camera_zero) put the travel direction
+# near image center at tilt 30, but pan slop + carpet yaw spoiled precision.
+# (The old servo's 72-78 "quiet band" would aim this one ~30 deg up.)
+SERVO_TILT_MIN = 4
+SERVO_TILT_MAX = 115
 SERVO_SETTLE_MS = 200              # wait after servo move
 PAN_SWEEP_ANGLES = [30, 60, 90, 120, 150]
 
@@ -233,6 +237,12 @@ LED_COLOR_SCANNING = "yellow"       # yellow during scan stop
 # IMU (ICM-20948, optional upgrade)
 # =============================================================================
 IMU_ENABLED = True                     # auto-detect; set False to force disable
+IMU_BACKEND = "auto"                   # auto (LSM9DS1, then ICM-20948) | lsm9ds1 | icm20948 | none
+IMU_I2C_BUS = 3                        # LSM9DS1 on its own bus: Pi 5 i2c3, GPIO22/23
+                                       # (header pins 15/16); docs/IMU_LSM9DS1.html
+IMU_AXIS_MAP = ("+x", "+y", "+z")      # sensor->robot (x fwd, y left, z up); identity
+                                       # until measured by catchaser.imu_check
+IMU_CALIBRATION_FILE = "calibration/imu_calibration.json"  # mag cal (rel. to raspbot_slam/)
 IMU_I2C_ADDRESS = 0x69                 # default ICM-20948 address (no conflict with 0x2B)
 IMU_GYRO_RATE_HZ = 100                # gyro sampling rate
 IMU_ACCEL_RATE_HZ = 50                # accelerometer sampling rate
@@ -249,4 +259,15 @@ IMU_MAG_DECLINATION_DEG = 0.0         # local magnetic declination
 CALIBRATION_DIR = "calibration"
 CAMERA_CALIBRATION_FILE = "calibration/camera_calibration.json"
 STRAFE_CALIBRATION_FILE = "calibration/strafe_calibration.json"
+
+# Printed targets (calibration/make_targets.py makes the PDF; keep in sync with the print)
+CHECKER_INNER_CORNERS = (9, 6)        # inner corners (cols, rows) -> 10 x 7 squares
+CHECKER_SQUARE_MM = 23.81            # as PRINTED: 25 mm design came out at 95.25% (10 squares = 9 3/8 in)
+ARUCO_DICT = "DICT_4X4_50"            # cv2.aruco predefined dictionary name
+ARUCO_MARKER_IDS = (0, 1, 2, 3, 4, 5)
+ARUCO_MARKER_SIZE_M = 0.1429         # as PRINTED (150 mm design at 95.25%); re-measure if reprinted
+CAMERA_HEIGHT_M = 0.107               # optical centre above the floor (tag PnP, 2026-10-11)
+CAMERA_PITCH_DEG = 0.3                # optical axis above level at SERVO_TILT_LEVEL; floor-odometry
+                                      # scale moves ~11%/deg, so re-fit after any tilt-servo change
+                                      # (sonar line runs, 2026-10-11: fwd +0.2%/-1%, rev +0.7%/-3.9%)
 DEFAULT_MAP_DIR = "maps"

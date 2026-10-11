@@ -102,3 +102,48 @@ class TestActuatorsMock:
         """Beep should be a no-op with no hardware."""
         a = Actuators(bot=None)
         a.beep(0.001)  # tiny duration for test speed
+
+
+class _FlakyBus:
+    """smbus stand-in: fails the first `fail` writes, then records."""
+
+    def __init__(self, fail=0):
+        self.fail, self.writes = fail, []
+
+    def write_i2c_block_data(self, addr, reg, data):
+        if self.fail > 0:
+            self.fail -= 1
+            raise OSError(121, "Remote I/O error")
+        self.writes.append((addr, reg, list(data)))
+
+
+class _FakeRaspbot:
+    def __init__(self, fail=0):
+        self._device, self._addr = _FlakyBus(fail), 0x2B
+
+
+def test_motor_writes_retry_after_i2c_error():
+    from raspbot_slam.actuators import Actuators
+    bot = _FakeRaspbot(fail=2)
+    act = Actuators(bot=bot)
+    act.drive(-60)
+    assert act.i2c_retries == 2
+    assert [w[2] for w in bot._device.writes] == [[0, 1, 60], [1, 1, 60], [2, 1, 60], [3, 1, 60]]
+
+
+def test_motor_write_raises_when_bus_stays_down():
+    import pytest
+    from raspbot_slam.actuators import Actuators, I2CWriteError
+    act = Actuators(bot=_FakeRaspbot(fail=100))
+    with pytest.raises(I2CWriteError):
+        act.drive(50)
+
+
+def test_stop_is_sent_twice_and_servo_uses_register_2():
+    from raspbot_slam.actuators import Actuators
+    bot = _FakeRaspbot()
+    act = Actuators(bot=bot)
+    act.stop()
+    assert len(bot._device.writes) == 8 and all(w[2][2] == 0 for w in bot._device.writes)
+    act.set_servo_pan(80)
+    assert bot._device.writes[-1][1:] == (0x02, [1, 80])

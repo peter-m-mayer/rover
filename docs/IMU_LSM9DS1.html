@@ -1,0 +1,371 @@
+<title>Raspbot IMU Wiring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one bench-side column, a checklist you work down with the robot in front of you;
+   the header diagram is the one wide element. Wire colors are the Qwiic standard. */
+:root {
+  --bg: #f6f7f4;
+  --surface: #ffffff;
+  --fg: #1d2420;
+  --muted: #5d6862;
+  --rule: #d9ddd7;
+  --accent: #1f6f5c;          /* PCB-green, used for step numbers + links */
+  --warn-bg: #fff4dc;
+  --warn-fg: #7a4a00;
+  --danger: #b3261e;
+  --w-black: #1b1b1b;          /* Qwiic GND   */
+  --w-red: #d0342c;            /* Qwiic 3.3 V */
+  --w-blue: #2a5bd7;           /* Qwiic SDA   */
+  --w-yellow: #e2b500;         /* Qwiic SCL   */
+  --pin: #c9a227;              /* gold header pin */
+  --pin-idle: #b9bfb9;
+  --board: #e7ebe6;
+  --font-display: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121614; --surface: #1a201d; --fg: #e4e9e5; --muted: #9aa69f; --rule: #2e3732;
+    --accent: #5cc4a6; --warn-bg: #3a2c10; --warn-fg: #f3cf86; --danger: #ff8a80;
+    --w-black: #e9ece9; --pin: #d8b445; --pin-idle: #4a524d; --board: #202824;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121614; --surface: #1a201d; --fg: #e4e9e5; --muted: #9aa69f; --rule: #2e3732;
+  --accent: #5cc4a6; --warn-bg: #3a2c10; --warn-fg: #f3cf86; --danger: #ff8a80;
+  --w-black: #e9ece9; --pin: #d8b445; --pin-idle: #4a524d; --board: #202824;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.6 var(--font-body);
+  padding-inline: 16px; padding-block: 28px 64px;
+}
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.1; margin: 0; }
+h1 { font-size: clamp(2.2rem, 7vw, 3.2rem); font-weight: 700; letter-spacing: 0.01em; }
+h2 { font-size: 1.75rem; font-weight: 600; }
+h3 { font-size: 1.2rem; font-weight: 600; }
+p { margin: 0; max-width: 65ch; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--board); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.eyebrow { font: 600 0.78rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+header { display: flex; flex-direction: column; gap: 12px; }
+.lede { font-size: 1.08rem; color: var(--muted); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 0.85rem/1.4 var(--font-mono); color: var(--muted); }
+.facts b { color: var(--fg); font-weight: 600; }
+section { display: flex; flex-direction: column; gap: 14px; }
+.callout { background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; padding: 12px 14px; }
+.callout strong { color: inherit; }
+.danger { color: var(--danger); font-weight: 700; }
+
+/* Steps: real sequence, so they are numbered */
+ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 22px; counter-reset: step; }
+ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 2.4rem 1fr; gap: 0 12px; }
+ol.steps > li::before {
+  content: counter(step); grid-row: 1 / span 3;
+  font: 700 1.6rem/1 var(--font-display); color: var(--accent);
+  border-top: 2px solid var(--accent); padding-top: 6px; text-align: left;
+}
+ol.steps > li > * { min-width: 0; }
+.step-body { display: flex; flex-direction: column; gap: 8px; }
+.step-body ul { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 4px; }
+label.done { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); cursor: pointer; width: fit-content; }
+label.done input { width: 18px; height: 18px; accent-color: var(--accent); }
+li.is-done .step-body > h3 { text-decoration: line-through; text-decoration-color: var(--muted); }
+
+/* Wire table */
+.wires { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.wires th, .wires td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.wires th { font: 600 0.75rem/1.2 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.wires td.pin { font: 600 1.15rem/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.swatch { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; white-space: nowrap; }
+.swatch i { width: 26px; height: 8px; border-radius: 4px; display: inline-block; border: 1px solid var(--rule); }
+.scroll { overflow-x: auto; }
+
+/* Header diagram */
+figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+figure .scroll { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+figcaption { font-size: 0.88rem; color: var(--muted); max-width: 65ch; }
+svg text { font-family: var(--font-mono); }
+
+.cmd { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; font: 0.85rem/1.5 var(--font-mono); overflow-x: auto; white-space: pre; margin: 0; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.two > div { min-width: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.tag { font: 600 0.72rem/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+dl.trouble { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+dl.trouble dt { font-weight: 700; }
+dl.trouble dd { margin: 2px 0 0; color: var(--muted); }
+footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 14px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<main>
+<header>
+  <span class="eyebrow">Cat Chaser 3000 · Raspbot V2 · IMU fit-out</span>
+  <h1>Raspbot IMU Wiring</h1>
+  <p class="lede">Fitting the Adafruit LSM9DS1 to the robot: open it up, plug four wires onto the Pi's header, stick the board down, close it up. No soldering. About 20 minutes. Once it's powered back on, I take it from there over SSH.</p>
+  <div class="facts">
+    <span>Board <b>Adafruit LSM9DS1 STEMMA QT (#4634)</b></span>
+    <span>Bus <b>Pi 5 i2c3 · GPIO22/23</b></span>
+    <span>Addresses <b>0x6B + 0x1E</b></span>
+  </div>
+</header>
+
+<section>
+  <h2>Why its own bus</h2>
+  <p>The Yahboom driver board already uses the Pi's main I2C pins (header pins 3 and 5) through a 3-wire plug, and has no spare I2C socket. The Pi 5 can run a second, independent I2C bus on two unused pins, 15 and 16. Putting the IMU there means you never unplug or splice Yahboom's wiring, and the IMU's 100+ readings per second never compete with motor commands.</p>
+</section>
+
+<section>
+  <h2>What you need</h2>
+  <ul style="margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:6px">
+    <li>The LSM9DS1 board and one Qwiic cable from your kit (the 4-wire black/red/blue/yellow one).</li>
+    <li>A way to get <strong>female</strong> sockets onto the Pi's header, which has male pins. Pick one:
+      <ul style="padding-left:1.2rem;margin-top:4px;display:flex;flex-direction:column;gap:4px">
+        <li><strong>Easiest:</strong> a Qwiic cable that ends in <em>female</em> sockets (Adafruit 4397 or SparkFun PRT-17261). If your kit has one, use it.</li>
+        <li><strong>What you have:</strong> the Qwiic cable that ends in <em>male</em> pins, plus 4 female-to-female Dupont jumpers to bridge from those pins to the header.</li>
+        <li><strong>With the crimp set:</strong> cut the male pins off, crimp female Dupont terminals on, and put each in a 1-pin housing.</li>
+      </ul>
+    </li>
+    <li>Thin, firm double-sided tape (3M VHB or similar, about 1 mm). Avoid thick squishy foam, because it lets the board rock.</li>
+    <li>A small Phillips screwdriver and a flashlight.</li>
+  </ul>
+  <p class="callout"><strong>The ICM-20948 in the other bag:</strong> keep it as a spare. The code supports it too, but fit one IMU at a time.</p>
+</section>
+
+<section>
+  <h2>The four connections</h2>
+  <div class="scroll">
+  <table class="wires">
+    <thead><tr><th>Wire</th><th>Signal</th><th>Pi header pin</th><th>Pi name</th></tr></thead>
+    <tbody>
+      <tr><td><span class="swatch"><i style="background:var(--w-red)"></i>Red</span></td><td>3.3 V power</td><td class="pin">17</td><td>3V3</td></tr>
+      <tr><td><span class="swatch"><i style="background:var(--w-black)"></i>Black</span></td><td>Ground</td><td class="pin">14</td><td>GND</td></tr>
+      <tr><td><span class="swatch"><i style="background:var(--w-blue)"></i>Blue</span></td><td>SDA (data)</td><td class="pin">15</td><td>GPIO22 · SDA3</td></tr>
+      <tr><td><span class="swatch"><i style="background:var(--w-yellow)"></i>Yellow</span></td><td>SCL (clock)</td><td class="pin">16</td><td>GPIO23 · SCL3</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="callout"><strong>Use pin 17 for power, never pin 2 or 4.</strong> Pins 2 and 4 are 5 V. A wire on the wrong pin, especially 5 V touching a GPIO, can damage the Pi. Count twice, then plug.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 700 250" width="700" height="250" role="img" aria-labelledby="hdr-title">
+      <title id="hdr-title">Raspberry Pi 5 40-pin header seen from above, pin 1 at the left. Pins 14, 15, 16 and 17 are highlighted.</title>
+      <rect x="20" y="58" width="660" height="118" rx="10" fill="var(--board)" stroke="var(--rule)"/>
+      <text x="30" y="38" font-size="12" fill="var(--muted)">BOARD EDGE (even pins)</text>
+      <text x="30" y="214" font-size="12" fill="var(--muted)">TOWARD CENTER OF PI (odd pins)</text>
+      <text x="676" y="38" font-size="12" fill="var(--muted)" text-anchor="end">USB / Ethernet end →</text>
+      <g id="pins"></g>
+      <text x="56" y="236" font-size="12" fill="var(--fg)" text-anchor="middle">pin 1</text>
+    </svg>
+    </div>
+    <figcaption>Looking down at the Pi with the USB and Ethernet ports to your right. Pin 1 is the corner pin farthest from the USB ports, on the row nearer the middle of the board; it usually has a square pad. Grey pins marked Y carry Yahboom's I2C plug (SDA on 3, SCL on 5, and a ground near them): leave that plug where it is.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>Step by step</h2>
+  <ol class="steps" id="steps">
+    <li>
+      <div class="step-body">
+        <h3>Power everything down</h3>
+        <ul>
+          <li>Tell me to shut the Pi down, or run <code>sudo poweroff</code> and wait for the green LED to stop flickering.</li>
+          <li>Slide the Yahboom power switch to OFF and unplug the charger.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s1"> Done</label>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Take the black top plate off</h3>
+        <ul>
+          <li>Yes, it has to come off. The Pi's 40-pin header sits under it.</li>
+          <li>Remove the screws at the plate's corners and keep them in a cup.</li>
+          <li>Lift the plate slowly. The small OLED screen on it is wired to the driver board by a short cable. Don't pull on that cable; fold the plate to the side, or unplug the OLED cable and photograph which way round it went first.</li>
+          <li>Take a photo of the header before touching anything. Send it to me if anything looks different from the diagram.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s2"> Done</label>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Find pin 1 and Yahboom's plug</h3>
+        <ul>
+          <li>Pin 1 is the corner pin farthest from the USB ports, on the inner row.</li>
+          <li>Yahboom's 3-wire I2C plug should be on pins 3 and 5 plus a nearby ground, right next to pin 1. Leave it alone.</li>
+          <li>Count along to your target pins. Pins 15 and 16 face each other across the two rows, 8 pins in from the pin-1 end.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s3"> Done</label>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Plug the cable into the IMU board</h3>
+        <ul>
+          <li>The board has two identical small white sockets (STEMMA QT). Use either; they're wired together.</li>
+          <li>The plug only fits one way round. Push it straight in until it seats; don't lever it sideways.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s4"> Done</label>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Connect the four wires to the header</h3>
+        <ul>
+          <li><b>Red → 17</b>, <b>Black → 14</b>, <b>Blue → 15</b>, <b>Yellow → 16</b>.</li>
+          <li>Each socket should slide fully down its pin with a little friction. A loose fit on a pin means intermittent dropouts later.</li>
+          <li>Recount from pin 1 once all four are on.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s5"> Done</label>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Choose the spot and stick it down</h3>
+        <div class="two">
+          <div>
+            <span class="tag">Preferred</span>
+            <strong>Underside of the black top plate, near its center</strong>
+            <p>Out of the cat's reach, short cable run, and well away from the four wheel motors, whose magnets would swamp the compass. Use this if there's at least 8 mm of clear air between the plate and the Pi's cooler or fan, and the board doesn't cover the vent slots.</p>
+          </div>
+          <div>
+            <span class="tag">If it doesn't fit</span>
+            <strong>Top of the plate, on the flat area beside the vents</strong>
+            <p>Route the cable down through the side gap, not across the OLED. Keep the board clear of the vent slots.</p>
+          </div>
+        </div>
+        <ul>
+          <li><strong>Square it to the robot:</strong> board edges parallel to the chassis edges, ideally with the printed <b>Y arrow pointing forward</b> toward the camera. Which way up doesn't matter; I measure the orientation. Being square does matter, because a board twisted 10° would mix forward and sideways motion.</li>
+          <li>Flat and firm: press for 30 seconds. It must not wobble.</li>
+          <li>Not on or next to the motors, battery, buzzer or Pi fan. Magnets in those parts upset the compass. The gyro, the part we need most, doesn't care where it sits on the body.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s6"> Done</label>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Close up and power on</h3>
+        <ul>
+          <li>Re-seat the OLED cable if you unplugged it. Make sure no wire is pinched under the plate or touching a wheel.</li>
+          <li>Screw the plate back on, switch on, and tell me it's up.</li>
+        </ul>
+        <label class="done"><input type="checkbox" id="s7"> Done</label>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>What I do next (over SSH)</h2>
+  <p>You don't need to type these; they're here so you know what happens. The robot moves in the last two, so leave it on the floor with about a metre clear.</p>
+  <pre class="cmd"># 1. Turn on the second I2C bus, once, then reboot
+echo 'dtoverlay=i2c3-pi5,pins_22_23,baudrate=400000' | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+
+# 2. The IMU should answer at 1e and 6b on bus 3
+i2cdetect -y 3
+
+# 3. Detect + 3-second still test (gravity, gyro noise)
+python3 -m catchaser.imu_check
+
+# 4. Work out which way the board faces (robot spins, then nudges forward)
+python3 -m catchaser.imu_check --axes --write
+
+# 5. Compass calibration (robot spins two full turns in place)
+python3 -m catchaser.imu_check --mag</pre>
+  <p>Then the gyro goes to work: it measures how far the robot really turned, which our camera-only estimate keeps getting wrong on carpet. It also unblocks the drive-based camera zeroing and the SLAM plan's IMU phase.</p>
+</section>
+
+<section>
+  <h2>If something's off</h2>
+  <dl class="trouble">
+    <div><dt><code>i2cdetect -y 3</code> shows nothing</dt><dd>Blue and yellow swapped, or a socket not fully down on its pin. Check that red is on 17 and black on 14, and that the plug is seated on the IMU board.</dd></div>
+    <div><dt>Only one of 1e / 6b appears</dt><dd>The chip is answering but half-configured. Power-cycle; if it persists, reseat the cable.</dd></div>
+    <div><dt>The robot's display or motors stop working after the fit</dt><dd>Yahboom's 3-wire plug on pins 3/5 got knocked. Reseat it exactly as in your "before" photo.</dd></div>
+    <div><dt>Still test says gyro noise is high</dt><dd>The board can rock: replace thick foam with thin firm tape, or check the cable isn't tugging it.</dd></div>
+    <div><dt>Compass check fails, or reports an uneven circle</dt><dd>It sits too close to a magnet (motor, speaker, battery). Move it farther away, or we run gyro-only. The gyro is the part that fixes the rotation problem anyway.</dd></div>
+  </dl>
+</section>
+
+<footer>
+  Source pinout: Pi 5 <code>pinctrl funcs</code> on this robot (GPIO22 = SDA3, GPIO23 = SCL3) and Yahboom's expansion-board diagram (YB-MPF01). Driver: <code>raspbot_slam/lsm9ds1.py</code>. Check tool: <code>catchaser/imu_check.py</code>.
+</footer>
+</main>
+
+<script>
+(function () {
+  // Header pins: odd pins on the inner row (bottom), even on the edge row (top).
+  var NS = "http://www.w3.org/2000/svg";
+  var g = document.getElementById("pins");
+  var wire = { 14: "--w-black", 15: "--w-blue", 16: "--w-yellow", 17: "--w-red" };
+  var yahboom = { 3: 1, 5: 1 };
+  var five = { 2: 1, 4: 1 };
+  for (var n = 1; n <= 40; n++) {
+    var col = Math.floor((n - 1) / 2);
+    var x = 56 + col * 31.5;
+    var y = (n % 2 === 0) ? 88 : 146;
+    var c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", x); c.setAttribute("cy", y);
+    c.setAttribute("r", wire[n] ? 11 : 8);
+    var fill = wire[n] ? "var(" + wire[n] + ")" : (yahboom[n] ? "var(--muted)" : "var(--pin-idle)");
+    c.setAttribute("fill", fill);
+    if (n === 1) { c.setAttribute("stroke", "var(--fg)"); c.setAttribute("stroke-width", "2"); }
+    if (five[n]) { c.setAttribute("stroke", "var(--danger)"); c.setAttribute("stroke-width", "3"); }
+    if (wire[n]) { c.setAttribute("stroke", "var(--fg)"); c.setAttribute("stroke-width", "1.5"); }
+    g.appendChild(c);
+    var t = document.createElementNS(NS, "text");
+    t.setAttribute("x", x); t.setAttribute("text-anchor", "middle");
+    t.setAttribute("font-size", wire[n] ? "13" : "10");
+    t.setAttribute("font-weight", wire[n] ? "600" : "400");
+    t.setAttribute("fill", wire[n] || five[n] || n === 1 ? "var(--fg)" : "var(--muted)");
+    t.setAttribute("y", (n % 2 === 0) ? 66 : 176);
+    t.textContent = n;
+    g.appendChild(t);
+    if (yahboom[n]) {
+      var yt = document.createElementNS(NS, "text");
+      yt.setAttribute("x", x); yt.setAttribute("y", y + 4); yt.setAttribute("text-anchor", "middle");
+      yt.setAttribute("font-size", "10"); yt.setAttribute("font-weight", "600"); yt.setAttribute("fill", "var(--bg)");
+      yt.textContent = "Y"; g.appendChild(yt);
+    }
+  }
+  var notes = [[2, "5V ✕"], [4, "5V ✕"]];
+  notes.forEach(function (nn) {
+    var col = Math.floor((nn[0] - 1) / 2), t = document.createElementNS(NS, "text");
+    t.setAttribute("x", 56 + col * 31.5); t.setAttribute("y", 112); t.setAttribute("text-anchor", "middle");
+    t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--danger)"); t.textContent = nn[1];
+    g.appendChild(t);
+  });
+  var lbl = [[14, "GND"], [16, "SCL3"], [15, "SDA3"], [17, "3V3"]];
+  lbl.forEach(function (l) {
+    var n = l[0], col = Math.floor((n - 1) / 2), t = document.createElementNS(NS, "text");
+    t.setAttribute("x", 56 + col * 31.5); t.setAttribute("text-anchor", "middle");
+    t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "600"); t.setAttribute("fill", "var(--fg)");
+    t.setAttribute("y", n % 2 === 0 ? 114 : 125);
+    t.textContent = l[1]; g.appendChild(t);
+  });
+
+  // Per-viewer checklist memory (convenience only).
+  var KEY = "raspbot-imu-steps";
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
+  document.querySelectorAll("#steps input[type=checkbox]").forEach(function (cb) {
+    var li = cb.closest("li");
+    cb.checked = !!saved[cb.id];
+    li.classList.toggle("is-done", cb.checked);
+    cb.addEventListener("change", function () {
+      saved[cb.id] = cb.checked;
+      li.classList.toggle("is-done", cb.checked);
+      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+    });
+  });
+})();
+</script>

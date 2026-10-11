@@ -119,6 +119,25 @@ python3 -m catchaser.benchmark             # detector Hz (add --camera for captu
 python3 -m catchaser.pan_check             # re-measure the pan servo direction sign
 i2cdetect -y 1                             # should show 0x2b (MCU) — needs i2c-tools
 
+# Camera "straight ahead" auto-zero (after any servo/camera remount):
+#   set the robot squared to floor lines (plank seams, or a ruler alongside it)
+python3 -m raspbot_slam.calibration.auto_camera_cal --target tag   # robot calibrates its camera on a
+                                           # wall tag (or --target board for the checkerboard); drives itself
+python3 -m raspbot_slam.m1_run --mode line # odometry test: drive at the most open wall, sonar = truth
+python3 -m raspbot_slam.wander --seconds 180   # reactive wander, recorded (forward only, stops at 0.45 m)
+python3 -m raspbot_slam.recorder --seconds 60 --label static   # log a run (nothing moves):
+                                           # datasets/slam_runs/<stamp>_<label>/ frames+IMU+sensors+power
+python3 -m catchaser.camera_zero           # floor-line vanishing point -> pan center + tilt level
+python3 -m catchaser.camera_zero --write   # ...and save SERVO_PAN_CENTER / SERVO_TILT_LEVEL
+python3 -m catchaser.servo_map --axis tilt --lo 10 --hi 115 --step 5   # map a servo (no wheels)
+
+# IMU (LSM9DS1 on i2c bus 3; wiring guide docs/IMU_LSM9DS1.html):
+i2cdetect -y 3                             # should show 1e and 6b
+python3 -m catchaser.imu_check             # detect + 3 s still test
+python3 -m catchaser.imu_check --axes --write   # measure board orientation (robot moves)
+python3 -m catchaser.imu_check --mag       # compass calibration (spins 2 turns)
+python3 -m catchaser.imu_check --stream    # live gyro/heading readout
+
 # Rotation feedback (optical flow — measures ACTUAL yaw, no encoders):
 python3 -m catchaser.flowcheck --deg 90    # closed-loop: turn until flow says 90 deg (CCW +)
 python3 -m catchaser.flowcheck --deg -90   # 90 deg clockwise
@@ -145,6 +164,11 @@ wrong — from above the roller axes must form an **X**. Use `wheelcheck` to see
 python3 -m pytest tests/ -q                                   # full suite
 python3 -m pytest tests/test_catchaser_chase.py -q            # chase controller
 python3 -m catchaser.chase_sim --scenario approach --pan --prey --verbose   # PyBullet
+python -m raspbot_slam.offline.eval_odometry datasets/slam_runs/<run>   # floor odometry vs gyro + sonar
+python -m raspbot_slam.offline.build_map datasets/slam_runs/<run> --out map.png   # occupancy map
+python -m raspbot_slam.calibration.make_targets   # docs/print/calibration_targets.pdf: checkerboard,
+                                                  # ArUco tags 0-5 (150 mm), room survey sheet.
+                                                  # Print at 100% and check the 100 mm bar.
 ```
 
 ---

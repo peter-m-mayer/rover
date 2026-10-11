@@ -14,11 +14,11 @@ new information. Based on the RASPBOT-V2 hardware + a live I2C scan of this unit
 | IR remote receiver | MCU reg 0x0C | ✅ | kill switch (any key). Idles at 0xFF. |
 | 4-ch line tracker (down IR) | MCU reg 0x0A | ❌ **unused** | `sensors.read_line_tracker()`. Points at the floor. |
 | 4 mecanum motors | MCU | ✅ | open-loop, **no encoders** — commanded ≠ actual. |
-| 2 servos (pan/tilt) | MCU | ✅ | pan tracking, rcbot. Pan center 73°, tilt rest 25°. |
+| 2 servos (pan/tilt) | MCU | ✅ | pan tracking, rcbot. Pan center 74 (auto-zeroed 2026-10-10, 3-6° slack), new tilt servo: level 30, rest 34, range 4-115. |
 | 14 WS2812B LEDs | MCU | ✅ | status colors. |
 | Buzzer | MCU reg 0x06 | ⚠️ hello only | not used in chase/play. |
 | OLED display (SSD1306) | I2C `0x3c` | ❌ (boot script owns it) | shows the IP; **writable** — could show status. |
-| ICM-20948 IMU (9-DOF) | I2C `0x69` | ❌ **not fitted** | code exists (`raspbot_slam/imu.py`); would need the add-on board. |
+| LSM9DS1 IMU (9-DOF) | own bus **i2c3** (GPIO22/23, pins 15/16) `0x6B`+`0x1E` | ⏳ **being fitted** (2026-10-10) | driver `raspbot_slam/lsm9ds1.py`, check `catchaser.imu_check`, wiring `docs/IMU_LSM9DS1.html`. Spare ICM-20948 also on hand. |
 | Battery voltage | — | ❌ **no telemetry** | driver exposes no read; brownouts suggest it matters (see below). |
 | USB mic / speaker | Pi USB | ❌ | vendor voice demos only; presence unconfirmed. |
 
