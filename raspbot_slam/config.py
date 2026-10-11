@@ -267,7 +267,8 @@ ARUCO_DICT = "DICT_4X4_50"            # cv2.aruco predefined dictionary name
 ARUCO_MARKER_IDS = (0, 1, 2, 3, 4, 5)
 ARUCO_MARKER_SIZE_M = 0.1429         # as PRINTED (150 mm design at 95.25%); re-measure if reprinted
 CAMERA_HEIGHT_M = 0.107               # optical centre above the floor (tag PnP, 2026-10-11)
-CAMERA_PITCH_DEG = 0.3                # optical axis above level at SERVO_TILT_LEVEL; floor-odometry
-                                      # scale moves ~11%/deg, so re-fit after any tilt-servo change
-                                      # (sonar line runs, 2026-10-11: fwd +0.2%/-1%, rev +0.7%/-3.9%)
+CAMERA_PITCH_DEG = 0.45               # optical axis above level at SERVO_TILT_LEVEL; floor-odometry
+                                      # scale moves ~13%/deg, so re-fit after any tilt-servo change
+                                      # (checkerboard intrinsics + sonar line runs, 2026-10-11:
+                                      #  run 1 fwd +0.2% rev +0.4%; run 2 fwd ~+2% rev -3%)
 DEFAULT_MAP_DIR = "maps"

@@ -25,8 +25,8 @@ It differs from them in two ways:
 |---|---|---|
 | Recorder (frames 10 Hz, IMU 100 Hz, sonar/IR 10 Hz, commands, power) | done, replay reader | `recorder.py` |
 | IMU axes / compass | identity axis map; compass 1.01x gyro after flipping mag X **and** Y | `lsm9ds1.py`, `calibration/imu_calibration.json` |
-| Camera intrinsics | **interim**, from wall tag 1 (f 473 px, k1 -0.42, k2 0.17, 0.24 px RMS); checkerboard redo needed (it fell over) | `calibration/auto_camera_cal.py --target tag` |
-| Camera height / pitch | 0.107 m (tag PnP); pitch +0.3 deg at tilt 30, fitted on sonar runs | `config.CAMERA_HEIGHT_M/PITCH_DEG` |
+| Camera intrinsics | checkerboard, self-driven incl. circle moves for oblique views: f 471/469 px, k1 -0.42, **0.17 px RMS** over 28 views (classic corner detector mis-assigned far views -> SB detector). Interim tag result agreed (473 px) | `calibration/auto_camera_cal.py` |
+| Camera height / pitch | 0.107 m (tag PnP); pitch +0.45 deg at tilt 30, fitted on sonar runs | `config.CAMERA_HEIGHT_M/PITCH_DEG` |
 | Tag localiser | ~5 cm / <1 deg within ~1.5 m of a tag; far single tags rejected | `tag_localizer.py` |
 | Motor dropouts | vendor lib swallowed I2C errors; a lost "stop" turned 10 deg into 43 deg. Now retried, raises if the bus stays down | `actuators.py` |
 | Heading hold | carpet veer was 17-36 deg/m; with gyro hold < 5 deg | `heading.py` |

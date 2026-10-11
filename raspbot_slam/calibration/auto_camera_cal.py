@@ -49,11 +49,14 @@ class CheckerTarget:
         self.objp = cc.board_points(BOARD, config.CHECKER_SQUARE_MM)
 
     def detect(self, g):
-        found, c = cv2.findChessboardCorners(g, BOARD, flags=FLAGS)
+        # SB detector: the classic one mis-assigned corners when squares were
+        # ~11 px (board at ~1 m), giving 7 px residuals on a whole station
+        found, c = cv2.findChessboardCornersSB(g, BOARD, flags=cv2.CALIB_CB_EXHAUSTIVE)
         return c.reshape(-1, 2) if found else None
 
     def refine(self, g, c):
-        return cv2.cornerSubPix(g, c.reshape(-1, 1, 2).astype(np.float32), (11, 11), (-1, -1), cc.CRITERIA)
+        found, c2 = cv2.findChessboardCornersSB(g, BOARD, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY)
+        return (c2 if found else c).reshape(-1, 1, 2).astype(np.float32)
 
     def grid_order(self, c):
         return c
@@ -140,6 +143,9 @@ class Rig:
         self.tilt = config.SERVO_TILT_LEVEL
         self.servo(self.pan, self.tilt, settle=0.6)
         self.gz_bias = self._gyro_bias()
+        from raspbot_slam.heading import GyroHeading
+        self.hd = GyroHeading(self.imu).start(calibrate=False)
+        self.hd.bias = self.gz_bias
         self.target = target or CheckerTarget()
         self.objp = self.target.objp
         self.save_dir = save_dir
@@ -254,11 +260,15 @@ class Rig:
         return math.degrees(turned)
 
     def hop(self, forward=0.0, strafe=0.0, seconds=0.18, speed=50):
+        from raspbot_slam.heading import drive_straight
         if forward > 0 and self.clear_mm() < STOP_MM:
             return False
-        self.act.drive(speed * forward, turn=0, strafe=speed * strafe)
-        time.sleep(seconds)
-        self.act.stop()
+        if strafe == 0:          # heading-held: carpet veers 17-36 deg/m open-loop
+            drive_straight(self.act, self.hd, speed * forward, seconds)
+        else:
+            self.act.drive(speed * forward, turn=0, strafe=speed * strafe)
+            time.sleep(seconds)
+            self.act.stop()
         time.sleep(0.35)
         return True
 
@@ -398,7 +408,8 @@ def goto_distance(rig, target_m, tol=0.05, max_hops=30):
         if abs((rig.pan - config.SERVO_PAN_CENTER) - bearing) > 12:   # drifted: face it again
             face_board(rig)
             continue
-        step = float(np.clip(0.6 * abs(d - target_m), 0.06, 0.45))   # s of drive per hop
+        # ~0.28 m/s at speed 50; under ~0.2 s the wheels barely break free on carpet
+        step = float(np.clip(abs(d - target_m) / 0.28, 0.2, 0.8))
         if not rig.hop(forward=1.0 if d > target_m else -1.0, seconds=step):
             print("  ultrasonic stop: too close, not driving further", flush=True)
             return d
@@ -423,6 +434,54 @@ def sweep_station(rig, label, targets=TARGETS):
             why = "board cut off by the frame edge" if not rig.inside(c) else "pose too similar"
             print(f"    target {tgt}: reached ({off[0]:.2f}, {off[1]:.2f}) but {why}", flush=True)
     rig.servo(config.SERVO_PAN_CENTER, rig.home_tilt)
+
+
+SPEED_MPS = 0.28          # speed 50, heading-held, carpet (sonar line runs 2026-10-11)
+
+
+def circle_move(rig, dist_m, a_from, a_to):
+    """Move around the board on a circle of radius dist_m, from viewing angle
+    a_from to a_to (deg; + = to the robot's right of the board's normal), using
+    only a turn and a heading-held forward drive (strafing barely works on
+    carpet). Ends facing the board."""
+    from raspbot_slam.heading import drive_straight, turn_to
+    p0 = dist_m * np.array([math.sin(math.radians(a_from)), -math.cos(math.radians(a_from))])
+    p1 = dist_m * np.array([math.sin(math.radians(a_to)), -math.cos(math.radians(a_to))])
+    u = -p0 / np.linalg.norm(p0)                      # currently facing the board
+    v = p1 - p0
+    phi = math.degrees(math.atan2(u[0] * v[1] - u[1] * v[0], u @ v))   # CCW +
+    chord = float(np.linalg.norm(v))
+    rig.servo(config.SERVO_PAN_CENTER, rig.tilt, settle=0.2)
+    turn_to(rig.act, rig.hd, rig.hd.heading_deg + phi)
+    if rig.clear_mm() < (chord + 0.2) * 1000:
+        print(f"  circle: blocked ({rig.clear_mm()} mm ahead), skipping {a_from:+.0f} -> {a_to:+.0f}",
+              flush=True)
+        turn_to(rig.act, rig.hd, rig.hd.heading_deg - phi)
+        return False
+    drive_straight(rig.act, rig.hd, 50, chord / SPEED_MPS)
+    time.sleep(0.3)
+    c, _ = local_search(rig)
+    if c is None and not search(rig):
+        return False
+    return face_board(rig)
+
+
+def oblique_views(rig, dist_m, angles=(30, 45)):
+    """Angled views on both sides: what pins down the focal length."""
+    for side in (1, -1):
+        prev = 0.0
+        for a in angles:
+            if not circle_move(rig, dist_m, prev, side * a):
+                break
+            prev = side * a
+            goto_distance(rig, dist_m, tol=0.08)
+            c, _ = rig.board()
+            if c is not None:
+                _, yaw, _ = rig.pnp(c)
+                print(f"  oblique {side * a:+d}: board seen at {yaw:+.0f} deg", flush=True)
+            sweep_station(rig, f"oblique {side * a:+d}", TARGETS[:5])
+        if prev:
+            circle_move(rig, dist_m, prev, 0.0)
 
 
 def orbit(rig, side, marks=(15, 28, 40), dist_m=0.5, max_hops=16):
@@ -494,17 +553,14 @@ def main(argv=None):
             sweep_station(rig, f"{got:.2f} m")
         if not args.no_orbit:
             mid = dists[len(dists) // 2]
-            for side in (-1, 1):
-                goto_distance(rig, mid)
-                face_board(rig)
-                orbit(rig, side, dist_m=mid)
-                for _ in range(6):           # come back toward the centre line
-                    rig.hop(strafe=-side, seconds=0.5, speed=70)
-                    face_board(rig)
+            goto_distance(rig, mid)
+            face_board(rig)
+            oblique_views(rig, mid)
     except KeyboardInterrupt:
         print("interrupted")
     finally:
         rig.act.stop()
+        rig.hd.stop()
         rig.servo(config.SERVO_PAN_CENTER, config.SERVO_TILT_REST, settle=0.2)
         rig.cap.release()
     print(f"\n{len(rig.views)} views in {time.monotonic() - t0:.0f} s", flush=True)

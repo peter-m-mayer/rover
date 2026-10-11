@@ -196,12 +196,12 @@ def calibrate_from_dir(path):
     for f in sorted(glob.glob(os.path.join(path, "view_*.png"))):
         gray = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
         size = gray.shape[::-1]
-        found, corners = cv2.findChessboardCorners(gray, board)
+        found, corners = cv2.findChessboardCornersSB(
+            gray, board, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY)
         if not found:
             print(f"  skip {os.path.basename(f)}: board not found")
             continue
-        corners = corners.reshape(-1, 1, 2)
-        img_points.append(cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), CRITERIA))
+        img_points.append(corners.reshape(-1, 1, 2).astype(np.float32))
         obj_points.append(objp)
         descs.append(pose_descriptor(corners, board, size))
     return finish(obj_points, img_points, descs, size, path)
