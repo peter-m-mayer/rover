@@ -56,6 +56,7 @@ class TagLocalizer:
         self.dist = np.zeros(5) if dist is None else np.asarray(dist, float).ravel()
         self.survey = load_survey(survey) if isinstance(survey, str) else survey
         size = size_m or config.ARUCO_MARKER_SIZE_M
+        self.size_m = size
         height = self.survey.get("marker_center_height_in", 10.25) * IN
         self.world = {int(k): tag_corners_world(t, size, height)
                       for k, t in self.survey["markers"].items()}
@@ -71,16 +72,46 @@ class TagLocalizer:
             return {}
         return {int(i): c.reshape(4, 2) for c, i in zip(corners, ids.ravel()) if int(i) in self.world}
 
-    def solve(self, detections, max_dz=0.05, max_pitch=20.0, max_single_range=2.5):
-        """Camera pose from {tag_id: (4, 2) image corners}; None if nothing usable.
+    def solve(self, detections, max_dz=0.05, max_pitch=20.0, max_range=2.5, agree_m=0.30):
+        """Camera pose from {tag_id: (4, 2) image corners}; None if nothing trustworthy.
 
-        A small flat target seen from afar has two nearly equally good poses
-        (the planar-PnP flip). Both candidates are scored against what we
-        know -- camera height ~CAMERA_HEIGHT_M, optical axis near level -- and
-        the pose is rejected if neither fits.
+        Gates (each one added after a real failure on 2026-10-11):
+        - tags farther than max_range (estimated from their size in the image)
+          are dropped before solving: far tags gave poses metres off;
+        - a small flat target has two near-equal PnP poses (the planar flip):
+          candidates must match the known camera height and be near level;
+        - the pose must lie inside the surveyed room;
+        - with several tags, every single-tag pose must agree with the joint
+          one within agree_m, else no fix.
         """
-        if not detections:
+        near = {i: c for i, c in detections.items() if self._range_from_size(c) <= max_range}
+        if not near:
             return None
+        best = self._solve_ids(near, max_dz, max_pitch)
+        if best is None or not self._in_room(best["x"], best["y"]):
+            return None
+        if len(near) > 1:
+            for i, c in near.items():
+                one = self._solve_ids({i: c}, max_dz, max_pitch)
+                if one is None or math.hypot(one["x"] - best["x"], one["y"] - best["y"]) > agree_m:
+                    return None
+        return best
+
+    def _range_from_size(self, corners):
+        side_px = math.sqrt(max(cv2.contourArea(np.asarray(corners, np.float32)), 1.0))
+        return self.K[0, 0] * self.size_m / side_px
+
+    def _in_room(self, x, y, margin=0.10):
+        s = self.survey
+        if "xmax_in" not in s:
+            return True
+        X, Y = s["xmax_in"] * IN, s["ymax_in"] * IN
+        if -margin <= x <= X + margin and -margin <= y <= Y + margin:
+            return True
+        a = s.get("alcove")
+        return bool(a) and a["x0"] * IN - margin <= x <= a["x1"] * IN and a["y0"] * IN - margin <= y <= a["y1"] * IN + margin
+
+    def _solve_ids(self, detections, max_dz, max_pitch):
         ids = sorted(detections)
         obj = np.concatenate([self.world[i] for i in ids]).astype(np.float64)
         img = np.concatenate([detections[i] for i in ids]).astype(np.float64)
@@ -95,8 +126,6 @@ class TagLocalizer:
             est["dz"] = abs(est["z"] - config.CAMERA_HEIGHT_M)
             if est["dz"] > max_dz or abs(est["pitch"]) > max_pitch:
                 continue
-            if len(ids) == 1 and est["range_m"] > max_single_range:
-                continue            # one small tag far away: position unreliable
             if best is None or est["reproj_px"] + 20 * est["dz"] < best["reproj_px"] + 20 * best["dz"]:
                 best = est
         return best

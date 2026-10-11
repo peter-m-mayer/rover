@@ -266,6 +266,8 @@ CHECKER_SQUARE_MM = 23.81            # as PRINTED: 25 mm design came out at 95.2
 ARUCO_DICT = "DICT_4X4_50"            # cv2.aruco predefined dictionary name
 ARUCO_MARKER_IDS = (0, 1, 2, 3, 4, 5)
 ARUCO_MARKER_SIZE_M = 0.1429         # as PRINTED (150 mm design at 95.25%); re-measure if reprinted
+CAMERA_LATENCY_S = 0.075              # frame timestamp minus capture time (USB camera): floor vs gyro
+                                      # rotation agree best at 75 ms (0.8 vs 2.4 deg at 0 ms), 2026-10-11
 CAMERA_HEIGHT_M = 0.107               # optical centre above the floor (tag PnP, 2026-10-11)
 CAMERA_PITCH_DEG = 0.45               # optical axis above level at SERVO_TILT_LEVEL; floor-odometry
                                       # scale moves ~13%/deg, so re-fit after any tilt-servo change

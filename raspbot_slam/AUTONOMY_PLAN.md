@@ -36,6 +36,22 @@ It differs from them in two ways:
 | Free-space scan | texture-based (colour off until exposure is locked); close walls match sonar to ~2 cm | `free_space.py` |
 | First maps | local occupancy maps from a line run and a 6-leg wander | `offline/build_map.py`, `wander.py` |
 
+**Tag self-test (2026-10-11, afternoon):**
+- First legs: dead reckoning vs tag fixes **3 cm / 2.8 deg and 9 cm / 0.8 deg**.
+- Then the camera head jammed under the round desk (sonar can't see its low ring
+  base; no stuck detection yet) and the **pan horn slipped ~38 deg** on its spline.
+  Tags and gyro still agreed on heading, but floor odometry measured motion in a
+  rotated frame, so the second tour's dead reckoning drifted out of the room.
+- Found and fixed along the way: tag fixes now drop far tags, reject poses outside
+  the room and require multi-tag agreement (heading vs gyro: median 0.4 deg over
+  370 fixes); camera frames lag the gyro by **75 ms** (`CAMERA_LATENCY_S`);
+  stuck detection; floor model learned from the start; fixes taken with the pan
+  centred, turning the body instead of trusting the pan servo.
+- New: `align_check.py` (camera vs body from a straight drive),
+  `offline/eval_tags.py` (dead reckoning vs tags, map over the survey).
+- **Hardware to do:** re-seat and tighten the pan horn; then `align_check` and re-run
+  `tag_tour`.
+
 **Next:** lock camera exposure / white balance for mapping (then re-enable colour);
 checkerboard calibration with the self-driving routine; tag fixes during the wander
 (multi-tag, wider pan sweep) so maps land in survey coordinates; pose graph.

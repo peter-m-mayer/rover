@@ -89,7 +89,7 @@ def main(argv=None):
     for t, img in run.iter_frames(gray=True):
         dth = None
         if not args.no_gyro and t_prev is not None:
-            dth = float(np.interp(t, gt, gyaw) - np.interp(t_prev, gt, gyaw))
+            dth = float(np.interp(t - config.CAMERA_LATENCY_S, gt, gyaw) - np.interp(t_prev - config.CAMERA_LATENCY_S, gt, gyaw))
         r = odo.step(img, dth)
         traj.append((t, *odo.pose, r[3] if r else 0))
         t_prev = t

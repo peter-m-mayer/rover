@@ -79,7 +79,7 @@ def main(argv=None):
         poses, t_prev, still_count, last = [], None, 0, None
         for t, img in run.iter_frames():
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            dth = None if t_prev is None else float(np.interp(t, gt, gyaw) - np.interp(t_prev, gt, gyaw))
+            dth = None if t_prev is None else float(np.interp(t - config.CAMERA_LATENCY_S, gt, gyaw) - np.interp(t_prev - config.CAMERA_LATENCY_S, gt, gyaw))
             r = odo.step(gray, dth)
             x, y, th = odo.pose
             poses.append((t, x, y, th))
