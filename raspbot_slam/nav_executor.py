@@ -33,6 +33,7 @@ from .room_map import RoomMap
 
 SPEED_MPS = 0.28              # speed 50 on carpet
 SONAR_AHEAD_M = 0.10          # sonar sits about this far ahead of the robot centre
+TURN_STALL_DEG = 20.0         # a turn that ends further off than this stalled
 FIX_EVERY_HOPS = 3            # try a tag fix (pan centred) every few hops
 
 
@@ -132,9 +133,16 @@ class Navigator:
         return med
 
     # ---- moving --------------------------------------------------------------------
-    def turn_to_heading(self, room_deg):
+    def turn_to_heading(self, room_deg, retry=True):
+        """Turn to a room heading; on a stalled turn back off once and retry.
+        Returns the final error (deg)."""
         _, _, h = self.pose
-        turn_to(self.rig.act, self.rig.hd, self.rig.hd.heading_deg + wrap180(room_deg - h))
+        err = turn_to(self.rig.act, self.rig.hd, self.rig.hd.heading_deg + wrap180(room_deg - h))
+        if abs(err) > TURN_STALL_DEG and retry:
+            self.mark(f"turn stalled {err:+.0f} deg short: backing off and retrying")
+            self.back_off()
+            err = self.turn_to_heading(room_deg, retry=False)
+        return err
 
     def hop(self, seconds):
         x0, y0, _ = self.pose
@@ -175,7 +183,10 @@ class Navigator:
             leg = math.hypot(wx - x, wy - y)
             bearing = math.degrees(math.atan2(wy - y, wx - x))
             if abs(wrap180(bearing - h)) > 6:
-                self.turn_to_heading(bearing)
+                if abs(self.turn_to_heading(bearing)) > TURN_STALL_DEG:
+                    self.mark("can't turn here: giving up on this goal")
+                    self.why = "stuck"
+                    return False
             free = self.sense(sweep=False)
             room = free - config.NAV_FRONT_CLEAR_M
             if room < SPEED_MPS * (config.NAV_MIN_HOP_S - config.NAV_START_LAG_S):

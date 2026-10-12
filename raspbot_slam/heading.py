@@ -94,8 +94,10 @@ def drive_straight(act, hd, speed, seconds, target_deg=None, kp=2.5, max_turn=30
     return wrap180(hd.heading_deg - target)
 
 
-def turn_to(act, hd, target_deg, speed=60, tol=2.0, timeout=8.0, coast_deg=6.0):
-    """Turn in place to an absolute gyro heading; returns the final error (deg)."""
+def turn_to(act, hd, target_deg, speed=60, tol=2.0, timeout=8.0, coast_deg=6.0, stall_s=1.0):
+    """Turn in place to an absolute gyro heading; returns the final error (deg).
+    Gives up early when the heading moves less than 3 deg in stall_s while the
+    motors turn (2026-10-12: wedged at a wall, each turn ran its 8 s timeout)."""
     t_end = time.monotonic() + timeout
     while time.monotonic() < t_end:
         err = wrap180(target_deg - hd.heading_deg)       # + = need to go CCW
@@ -108,9 +110,17 @@ def turn_to(act, hd, target_deg, speed=60, tol=2.0, timeout=8.0, coast_deg=6.0):
             time.sleep(0.25)
             continue
         act.drive(0, turn=-speed if err > 0 else speed)
+        t_ref, h_ref, stalled = time.monotonic(), hd.heading_deg, False
         while time.monotonic() < t_end and abs(wrap180(target_deg - hd.heading_deg)) > coast_deg:
             time.sleep(0.01)
+            if time.monotonic() - t_ref > stall_s:
+                if abs(wrap180(hd.heading_deg - h_ref)) < 3.0:
+                    stalled = True
+                    break
+                t_ref, h_ref = time.monotonic(), hd.heading_deg
         act.stop()
+        if stalled:
+            break
         time.sleep(0.4)
     act.stop()
     return wrap180(target_deg - hd.heading_deg)
