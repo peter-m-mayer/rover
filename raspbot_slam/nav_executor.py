@@ -178,7 +178,7 @@ class Navigator:
                 self.turn_to_heading(bearing)
             free = self.sense(sweep=False)
             room = free - config.NAV_FRONT_CLEAR_M
-            if room < 0.05:
+            if room < SPEED_MPS * (config.NAV_MIN_HOP_S - config.NAV_START_LAG_S):
                 # something the map didn't know is right ahead: mark it lethal (one
                 # weak sonar reading doesn't flip the cells, and the planner would
                 # choose the same path again), then replan
@@ -192,10 +192,11 @@ class Navigator:
                     self.why = "blocked"
                     return False
                 continue
-            seconds = float(np.clip(min(leg, room) / SPEED_MPS, config.NAV_MIN_HOP_S, config.NAV_HOP_S))
+            seconds = float(np.clip(min(leg, room) / SPEED_MPS + config.NAV_START_LAG_S,
+                                    config.NAV_MIN_HOP_S, config.NAV_HOP_S))
             moved = self.hop(seconds)
-            expected = SPEED_MPS * seconds
-            if moved < config.NAV_STALL_M and expected > 0.05:
+            expected = SPEED_MPS * (seconds - config.NAV_START_LAG_S)
+            if moved < config.NAV_STALL_FRAC * expected:
                 contacts += 1
                 self.contacts += 1
                 self.mark(f"contact: hop moved {moved * 100:.0f} cm of {expected * 100:.0f}")

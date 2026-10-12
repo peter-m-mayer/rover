@@ -285,8 +285,9 @@ TAG_MAX_RANGE_M = 1.5                 # tag fixes: drop tags farther than this (
 TAG_MAX_DZ_M = 0.04                   # fix's camera height must be within this of CAMERA_HEIGHT_M
 TAG_MIN_FRAMES = 3                    # a fix is the median of >= this many good frames
 NAV_HOP_S = 0.5                       # longest heading-held hop (~0.14 m at speed 50)
-NAV_MIN_HOP_S = 0.2                   # shorter hops don't break carpet stiction
+NAV_MIN_HOP_S = 0.35                  # 0.2 s hops moved only 1-3 cm on 2026-10-12 (read as false contacts)
+NAV_START_LAG_S = 0.12                # carpet stiction: a hop covers about speed * (t - lag)
 NAV_SPEED = 50
-NAV_STALL_M = 0.03                    # a hop moving less than this is a stall (pushing)
+NAV_STALL_FRAC = 0.4                  # a hop moving less than this fraction of the expected distance is a stall
 NAV_FRONT_CLEAR_M = 0.25              # hop only into free space beyond this margin
 DEFAULT_MAP_DIR = "maps"
