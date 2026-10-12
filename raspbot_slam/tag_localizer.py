@@ -72,7 +72,7 @@ class TagLocalizer:
             return {}
         return {int(i): c.reshape(4, 2) for c, i in zip(corners, ids.ravel()) if int(i) in self.world}
 
-    def solve(self, detections, max_dz=0.05, max_pitch=20.0, max_range=2.5, agree_m=0.30):
+    def solve(self, detections, max_dz=None, max_pitch=20.0, max_range=None, agree_m=0.30):
         """Camera pose from {tag_id: (4, 2) image corners}; None if nothing trustworthy.
 
         Gates (each one added after a real failure on 2026-10-11):
@@ -84,6 +84,8 @@ class TagLocalizer:
         - with several tags, every single-tag pose must agree with the joint
           one within agree_m, else no fix.
         """
+        max_dz = config.TAG_MAX_DZ_M if max_dz is None else max_dz
+        max_range = config.TAG_MAX_RANGE_M if max_range is None else max_range
         near = {i: c for i, c in detections.items() if self._range_from_size(c) <= max_range}
         if not near:
             return None

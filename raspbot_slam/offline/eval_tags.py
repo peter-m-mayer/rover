@@ -11,8 +11,11 @@ Score dead reckoning against the surveyed tags, offline (AUTONOMY_PLAN.md M1/M2)
 3. At each later fix group: position and heading error vs distance travelled.
    A fix group whose heading disagrees with the gyro by > 15 deg is an outlier
    (planar flip, camera knocked off-axis) and is reported but not scored.
-With --map, the occupancy map is built in room coordinates (camera free space
-and sonar, as offline/build_map.py) and drawn over the surveyed walls.
+With --map, the occupancy map is built in room coordinates (room_map.RoomMap:
+camera free space at every pan, sonar cone, footprint) and drawn over the
+surveyed walls. With --localizer, every fix also goes through
+localizer.Localizer in scoring mode (gate, heading watchdog) and its decisions
+are printed.
 """
 
 import argparse
@@ -26,8 +29,9 @@ from .. import config
 from ..floor_odometry import FloorModel, FloorOdometry
 from ..free_space import FreeSpaceScanner
 from ..recorder import RunLog
+from ..localizer import Localizer
+from ..room_map import RoomMap
 from ..tag_localizer import IN, TagLocalizer
-from .build_map import Grid
 from .eval_odometry import gyro_yaw
 
 
@@ -41,6 +45,8 @@ def main(argv=None):
     p.add_argument("run")
     p.add_argument("--plot", default=None)
     p.add_argument("--map", action="store_true")
+    p.add_argument("--localizer", action="store_true",
+                   help="run fixes through localizer.Localizer in scoring mode (gates, heading watchdog)")
     args = p.parse_args(argv)
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,8 +54,12 @@ def main(argv=None):
         cal = json.load(f)
     K, dist = np.array(cal["camera_matrix"]), np.array(cal["dist_coeffs"])
     loc = TagLocalizer(K, dist)
-    model = FloorModel(K, dist, config.CAMERA_HEIGHT_M, config.CAMERA_PITCH_DEG)
     run = RunLog(args.run)
+    # the camera mount changes between sessions: use the run's own settings
+    rc = run.meta.get("config", {})
+    pan_c = rc.get("SERVO_PAN_CENTER", config.SERVO_PAN_CENTER)
+    model = FloorModel(K, dist, rc.get("CAMERA_HEIGHT_M", config.CAMERA_HEIGHT_M),
+                       rc.get("CAMERA_PITCH_DEG", config.CAMERA_PITCH_DEG))
     gt, gyaw, _ = gyro_yaw(run)
     pans = [(float(c["t"]), float(c["a"])) for c in run.cmds if c["kind"] == "pan"]
     pt = np.array([q[0] for q in pans]); pv = np.array([q[1] for q in pans])
@@ -57,12 +67,21 @@ def main(argv=None):
 
     odo = FloorOdometry(model)
     fs = FreeSpaceScanner(model, max_range_m=1.6)
-    grid = Grid(size_m=12.0, res_m=0.04)
-    grid.origin = 0
-    off = int(1.5 / grid.res)                       # room (0,0) sits 1.5 m in from the grid corner
+    rmap = RoomMap.from_survey(loc.survey)
 
-    def gcell(x, y):
-        return int(round(x / grid.res)) + off, int(round(y / grid.res)) + off
+    class Odo:                                       # pose holder the Localizer can shift
+        travelled_m = 0.0
+
+        @property
+        def pose(self):
+            return pose[0], pose[1], math.degrees(pose[2])
+
+        def shift(self, dx, dy, dh=0.0):
+            global_shift[0] += dx; global_shift[1] += dy; global_shift[2] += math.radians(dh)
+    global_shift = np.zeros(3)
+    odo_shim = Odo()
+    filt = None
+    now = [0.0]
 
     raw_fixes, path = [], []
     anchor = None                                    # (x, y, yaw_offset) once anchored
@@ -74,9 +93,9 @@ def main(argv=None):
         g = float(np.interp(t - config.CAMERA_LATENCY_S, gt, gyaw))                  # gyro_yaw is already in radians
         dth = None if prev_t is None else g - float(np.interp(prev_t - config.CAMERA_LATENCY_S, gt, gyaw))
         r = odo.step(gray, dth)
-        pan = pv[max(0, np.searchsorted(pt, t) - 1)] if len(pt) else config.SERVO_PAN_CENTER
+        pan = pv[max(0, np.searchsorted(pt, t) - 1)] if len(pt) else pan_c
         est = None
-        if pan == config.SERVO_PAN_CENTER:
+        if pan == pan_c:
             det = loc.detect(gray)
             est = loc.solve(det) if det else None
             if est:
@@ -85,29 +104,39 @@ def main(argv=None):
             anchor = (t, est)
             pose = np.array([est["x"], est["y"], math.radians(est["yaw"])])
             yaw_off = math.radians(est["yaw"]) - g
+            if args.localizer:
+                filt = Localizer(odo_shim, correct=False, log=lambda m: print(f"  [{now[0] - gt[0]:.1f}s] {m}"))
         elif anchor is not None:
             h_prev = pose[2]
-            pose[2] = g + yaw_off
+            pose[2] = g + yaw_off + global_shift[2]
             if r is not None:
                 c, s = math.cos(h_prev), math.sin(h_prev)
                 pose[0] += c * r[0] - s * r[1]
                 pose[1] += s * r[0] + c * r[1]
+                odo_shim.travelled_m += math.hypot(r[0], r[1])
+            pose[0] += global_shift[0]; pose[1] += global_shift[1]
+            global_shift[:] = 0
+            now[0] = t
+            if filt is not None and est is not None:
+                filt.add_fix(dict(est, heading=est["yaw"]))
+                yaw_off += global_shift[2]; global_shift[2] = 0
+                pose[2] = g + yaw_off
             path.append((t, *pose))
             if args.map and fs.hist is not None or (args.map and float(np.interp(t, st, sd)) > 500):
                 if float(np.interp(t, st, sd)) > 500:
                     fs.learn(img)
                 still = r is not None and math.hypot(r[0], r[1]) < 0.003 and (dth is None or abs(dth) < 0.01)
-                if still and pan == config.SERVO_PAN_CENTER and len(path) % 3 == 0:
+                if still and len(path) % 3 == 0:
                     res = fs.scan(img)
                     if res is not None:
                         x, y, th = pose
-                        for bj, rj, hj in zip(*res):
-                            if bj == bj:
-                                a = th + bj
-                                i0, j0 = gcell(x, y)
-                                i1, j1 = gcell(x + rj * math.cos(a), y + rj * math.sin(a))
-                                grid.ray(*(np.array([i0, j0, i1, j1]) * grid.res), bool(hj))
+                        rmap.add_camera_scan((x, y, th + math.radians(pan - pan_c)), *res)
+                        if pan == pan_c:
+                            us = float(np.interp(t, st, sd)) / 1000
+                            rmap.add_sonar((x, y, th), us)
+                rmap.add_footprint(pose[0], pose[1])
         prev_t = t
+        now[0] = t
     if anchor is None:
         print("no usable tag fix in this run")
         return 1
@@ -147,6 +176,19 @@ def main(argv=None):
               f"median error {np.median(s[:, 1]):.2f} m / {np.median(np.abs(s[:, 2])):.1f} deg, "
               f"max {s[:, 1].max():.2f} m; error per metre travelled {np.median(s[:, 1] / np.maximum(s[:, 0], 0.3)):.1%}")
 
+    # survey consistency: with one continuous gyro, (tag yaw - gyro) should be the
+    # same constant for every tag; a tag whose offset differs is mis-surveyed (or
+    # the gyro slipped between sightings -- compare the times)
+    per = {}
+    for f in raw_fixes:
+        per.setdefault(tuple(f[5]), []).append((f[0], wrap(f[3] - f[4])))
+    if len(per) > 1:
+        print("\nper-tag heading offset (tag yaw - gyro), should agree across tags:")
+        for k, v in sorted(per.items()):
+            off = np.array([o for _, o in v])
+            c = math.degrees(math.atan2(np.median(np.sin(np.radians(off))), np.median(np.cos(np.radians(off)))))
+            print(f"  tags {str(list(k)):>8}: {c:+7.1f} deg  (n {len(v)}, t {v[0][0] - gt[0]:.0f}-{v[-1][0] - gt[0]:.0f} s)")
+
     if args.plot:
         sv = loc.survey
         X, Y = sv["xmax_in"] * IN, sv["ymax_in"] * IN
@@ -158,14 +200,11 @@ def main(argv=None):
         canvas = np.full((H, W, 3), 255, np.uint8)
         to_px = lambda x, y: (int((x + 1.7) * scale), int(H - (y + 0.5) * scale))
         if args.map:
-            occ = grid.L > 0.8
-            free = grid.L < -0.5
-            for (j, i) in np.argwhere(free):
-                x, y = (i - off) * grid.res, (j - off) * grid.res
-                cv2.rectangle(canvas, to_px(x, y), to_px(x + grid.res, y + grid.res), (235, 245, 235), -1)
-            for (j, i) in np.argwhere(occ):
-                x, y = (i - off) * grid.res, (j - off) * grid.res
-                cv2.rectangle(canvas, to_px(x, y), to_px(x + grid.res, y + grid.res), (40, 40, 40), -1)
+            res_ = rmap.res
+            for mask, colour in ((rmap.free(), (235, 245, 235)), ((rmap.L > 0.8) & ~rmap.wall, (40, 40, 40))):
+                for (j, i) in np.argwhere(mask):
+                    x, y = rmap.centre(i, j)
+                    cv2.rectangle(canvas, to_px(x - res_ / 2, y - res_ / 2), to_px(x + res_ / 2, y + res_ / 2), colour, -1)
         cv2.polylines(canvas, [np.array([to_px(x, y) for x, y in outline], np.int32)], False, (200, 120, 0), 2)
         cv2.line(canvas, to_px(0, 0), to_px(0, 36 * IN), (255, 160, 60), 5)            # mirror door
         for k, m in sv["markers"].items():

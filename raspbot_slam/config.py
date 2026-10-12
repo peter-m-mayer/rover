@@ -280,4 +280,13 @@ CAMERA_PITCH_DEG = 4.0                # optical axis above level at SERVO_TILT_L
                                       # 4.3-5.0. Before the re-seat it was 0.45:
                                       # (checkerboard intrinsics + sonar line runs, 2026-10-11:
                                       #  run 1 fwd +0.2% rev +0.4%; run 2 fwd ~+2% rev -3%)
+TAG_MAX_RANGE_M = 1.5                 # tag fixes: drop tags farther than this (size in image).
+                                      # 2026-10-11 tour: a 1.28 m, 2-frame fix was 0.5 m off
+TAG_MAX_DZ_M = 0.04                   # fix's camera height must be within this of CAMERA_HEIGHT_M
+TAG_MIN_FRAMES = 3                    # a fix is the median of >= this many good frames
+NAV_HOP_S = 0.5                       # longest heading-held hop (~0.14 m at speed 50)
+NAV_MIN_HOP_S = 0.2                   # shorter hops don't break carpet stiction
+NAV_SPEED = 50
+NAV_STALL_M = 0.03                    # a hop moving less than this is a stall (pushing)
+NAV_FRONT_CLEAR_M = 0.25              # hop only into free space beyond this margin
 DEFAULT_MAP_DIR = "maps"

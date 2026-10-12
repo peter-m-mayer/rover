@@ -19,6 +19,20 @@ It differs from them in two ways:
   hardware can produce reliably. We keep the occupancy grid, frontier
   explorer, A*, and the mock and simulator test pattern.
 
+## Navigation v2 (2026-10-12)
+
+The evening tag tour (reactive driving) reached 1 of 5 stops: fixed standpoints were inside furniture and
+look-ahead-and-detour bounced between obstacles. Plan and lessons: **[NAV_PLAN.md](NAV_PLAN.md)**. Built:
+`room_map.py` (survey-seeded log-odds map, sonar cone, contacts, costmap), `planner.py` (Dijkstra cost field,
+clearance-checked shortcuts, tag viewpoints), `localizer.py` (Kalman updates from gated tag fixes, heading
+watchdog, position recovery), `nav_executor.py` (sense -> map -> plan -> one hop -> stall check), tag_tour v2.
+Offline replay of the evening tour: the watchdog re-anchors the 174 deg heading break at 81 s. Findings:
+- accelerometer spikes do NOT separate furniture contact from mecanum vibration (clean runs peak as high):
+  contact = floor odometry not moving during a commanded hop;
+- per-tag heading offsets: tags 1/4/5 agree with each other; tag 2 (tonight) and tag 0 (afternoon, n=2) sat
+  ~180 deg away. Unresolved: gyro slip vs survey. eval_tags now prints the per-tag check every run.
+- not yet run live (room dark, robot charging).
+
 ## Status (2026-10-11, end of first autonomous session)
 
 | Item | Result | Where |
@@ -26,7 +40,7 @@ It differs from them in two ways:
 | Recorder (frames 10 Hz, IMU 100 Hz, sonar/IR 10 Hz, commands, power) | done, replay reader | `recorder.py` |
 | IMU axes / compass | identity axis map; compass 1.01x gyro after flipping mag X **and** Y | `lsm9ds1.py`, `calibration/imu_calibration.json` |
 | Camera intrinsics | checkerboard, self-driven incl. circle moves for oblique views: f 471/469 px, k1 -0.42, **0.17 px RMS** over 28 views (classic corner detector mis-assigned far views -> SB detector). Interim tag result agreed (473 px) | `calibration/auto_camera_cal.py` |
-| Camera height / pitch | 0.107 m (tag PnP); pitch +0.45 deg at tilt 30, fitted on sonar runs | `config.CAMERA_HEIGHT_M/PITCH_DEG` |
+| Camera height / pitch | 0.107 m (tag PnP); pitch +0.45 deg at tilt 30, fitted on sonar runs; **4.0 deg after the 2026-10-11 evening re-seat** (pan centre 74 -> 93) | `config.CAMERA_HEIGHT_M/PITCH_DEG` |
 | Tag localiser | ~5 cm / <1 deg within ~1.5 m of a tag; far single tags rejected | `tag_localizer.py` |
 | Motor dropouts | vendor lib swallowed I2C errors; a lost "stop" turned 10 deg into 43 deg. Now retried, raises if the bus stays down | `actuators.py` |
 | Heading hold | carpet veer was 17-36 deg/m; with gyro hold < 5 deg | `heading.py` |

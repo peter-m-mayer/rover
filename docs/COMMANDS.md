@@ -126,7 +126,8 @@ python3 -m raspbot_slam.calibration.auto_camera_cal --target tag   # robot calib
 python3 -m raspbot_slam.m1_run --mode line # odometry test: drive at the most open wall, sonar = truth
 python3 -m raspbot_slam.wander --seconds 180   # reactive wander, recorded (forward only, stops at 0.45 m)
 python3 -m raspbot_slam.align_check        # camera vs body from a 1.5 s straight drive (needs 0.9 m clear)
-python3 -m raspbot_slam.tag_tour           # dead-reckoning self-test: visit each tag, compare with tag fixes
+python3 -m raspbot_slam.tag_tour           # self-test v2: plan to a viewpoint of each tag on the room map, compare DR with tag fixes
+                                            #   --correct applies fixes; saves room_map.npz/.png in the run folder
 python3 -m raspbot_slam.recorder --seconds 60 --label static   # log a run (nothing moves):
                                            # datasets/slam_runs/<stamp>_<label>/ frames+IMU+sensors+power
 python3 -m catchaser.camera_zero           # floor-line vanishing point -> pan center + tilt level
@@ -169,6 +170,7 @@ python3 -m catchaser.chase_sim --scenario approach --pan --prey --verbose   # Py
 python -m raspbot_slam.offline.eval_odometry datasets/slam_runs/<run>   # floor odometry vs gyro + sonar
 python -m raspbot_slam.offline.build_map datasets/slam_runs/<run> --out map.png   # occupancy map
 python -m raspbot_slam.offline.eval_tags datasets/slam_runs/<run> --plot out.png --map   # DR vs tags + map over the survey
+python -m raspbot_slam.offline.eval_tags datasets/slam_runs/<run> --localizer            # + localizer gates / heading watchdog; per-tag survey check
 python -m raspbot_slam.calibration.make_targets   # docs/print/calibration_targets.pdf: checkerboard,
                                                   # ArUco tags 0-5 (150 mm), room survey sheet.
                                                   # Print at 100% and check the 100 mm bar.
