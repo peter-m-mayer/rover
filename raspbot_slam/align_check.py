@@ -1,7 +1,7 @@
 """
 Camera-vs-body alignment check from a short straight drive.
 
-    python3 -m raspbot_slam.align_check [--pan 74] [--seconds 1.5]
+    python3 -m raspbot_slam.align_check [--pan 93] [--seconds 1.5]
 
 Drive straight (gyro heading hold), track the floor with the camera at the
 given pan, and report the direction of travel *as the camera sees it*. With

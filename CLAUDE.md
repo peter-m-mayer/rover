@@ -42,7 +42,7 @@
   - static IPs as above
   - pip pins (numpy 1.26.4, opencv-headless 4.11.0.86, onnxruntime 1.18.1, scipy 1.14.0)
   - Raspbot_Lib
-  - OLED and app autostart; `reservo.py` now rests the servos at pan 74 / tilt 34
+  - OLED and app autostart; `reservo.py` now rests the servos at pan 93 / tilt 34 (93 since the 2026-10-11 re-seat)
   - `.bashrc` aliases and the phone scripts
   - datasets
 

@@ -192,7 +192,11 @@ CAMERA_HEIGHT = 480
 # =============================================================================
 SERVO_PAN_ID = 1
 SERVO_TILT_ID = 2
-SERVO_PAN_CENTER = 74             # auto-zeroed 2026-10-10 (catchaser.camera_zero:
+SERVO_PAN_CENTER = 93             # 2026-10-11 after the pan horn was re-seated:
+                                  # align_check (straight drive, floor motion seen
+                                  # by the camera) gave +19.3 deg at 74, +39.8 at
+                                  # 55, -0.2 at 93. Re-run align_check after any
+                                  # bump. Earlier: 74, auto-zeroed 2026-10-10 (catchaser.camera_zero:
                                   # floor-line vanishing point, robot squared to a
                                   # ruler on plank flooring). 74 -> VP 0.4-0.7 deg
                                   # off, 75 overshoots. Pan has 3-6 deg of SLACK
@@ -269,8 +273,11 @@ ARUCO_MARKER_SIZE_M = 0.1429         # as PRINTED (150 mm design at 95.25%); re-
 CAMERA_LATENCY_S = 0.075              # frame timestamp minus capture time (USB camera): floor vs gyro
                                       # rotation agree best at 75 ms (0.8 vs 2.4 deg at 0 ms), 2026-10-11
 CAMERA_HEIGHT_M = 0.107               # optical centre above the floor (tag PnP, 2026-10-11)
-CAMERA_PITCH_DEG = 0.45               # optical axis above level at SERVO_TILT_LEVEL; floor-odometry
-                                      # scale moves ~13%/deg, so re-fit after any tilt-servo change
+CAMERA_PITCH_DEG = 4.0                # optical axis above level at SERVO_TILT_LEVEL; floor-odometry
+                                      # scale moves ~13%/deg, so re-fit after any tilt-servo change.
+                                      # 4.0 since the camera was re-seated 2026-10-11 evening: sonar
+                                      # line run 20261011_195005 fwd +2% rev +0.2%; tag PnP says
+                                      # 4.3-5.0. Before the re-seat it was 0.45:
                                       # (checkerboard intrinsics + sonar line runs, 2026-10-11:
                                       #  run 1 fwd +0.2% rev +0.4%; run 2 fwd ~+2% rev -3%)
 DEFAULT_MAP_DIR = "maps"
