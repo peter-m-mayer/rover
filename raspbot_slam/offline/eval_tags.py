@@ -34,6 +34,8 @@ from ..room_map import RoomMap
 from ..tag_localizer import IN, TagLocalizer
 from .eval_odometry import gyro_yaw
 
+PAN_SETTLE_S = 0.5            # servo travel + camera latency after a pan command
+
 
 def wrap(a):
     return (a + 180.0) % 360.0 - 180.0
@@ -93,9 +95,13 @@ def main(argv=None):
         g = float(np.interp(t - config.CAMERA_LATENCY_S, gt, gyaw))                  # gyro_yaw is already in radians
         dth = None if prev_t is None else g - float(np.interp(prev_t - config.CAMERA_LATENCY_S, gt, gyaw))
         r = odo.step(gray, dth)
-        pan = pv[max(0, np.searchsorted(pt, t) - 1)] if len(pt) else pan_c
+        k = np.searchsorted(pt, t) - 1
+        pan = pv[max(0, k)] if len(pt) else pan_c
+        # frames just after a pan command still show the old view (servo travel +
+        # camera latency): a 2026-10-11 replay took a +25 deg view as centred
+        settled = k < 0 or t - pt[k] > PAN_SETTLE_S
         est = None
-        if pan == pan_c:
+        if pan == pan_c and settled:
             det = loc.detect(gray)
             est = loc.solve(det) if det else None
             if est:
@@ -126,7 +132,7 @@ def main(argv=None):
                 if float(np.interp(t, st, sd)) > 500:
                     fs.learn(img)
                 still = r is not None and math.hypot(r[0], r[1]) < 0.003 and (dth is None or abs(dth) < 0.01)
-                if still and len(path) % 3 == 0:
+                if still and settled and len(path) % 3 == 0:
                     res = fs.scan(img)
                     if res is not None:
                         x, y, th = pose
