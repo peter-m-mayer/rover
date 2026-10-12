@@ -32,6 +32,8 @@ from .planner import plan
 from .room_map import RoomMap
 
 SPEED_MPS = 0.28              # speed 50 on carpet
+SONAR_AHEAD_M = 0.10          # sonar sits about this far ahead of the robot centre
+FIX_EVERY_HOPS = 3            # try a tag fix (pan centred) every few hops
 
 
 class Navigator:
@@ -46,6 +48,7 @@ class Navigator:
         self.loc = None
         self.contacts = 0
         self.path = []                       # driven (x, y) for plots
+        self.why = None                      # why the last go_to gave up
 
     # ---- setup ---------------------------------------------------------------------
     def start(self, fix):
@@ -148,16 +151,21 @@ class Navigator:
 
     def go_to(self, goal, tol=0.15, max_hops=60, max_contacts=3):
         """Drive to room point `goal`; True when within tol."""
-        contacts = 0
+        contacts = blocked = 0
+        self.why = None
         for k in range(max_hops):
             x, y, h = self.pose
             dist = math.hypot(goal[0] - x, goal[1] - y)
             if dist < tol:
                 return True
             self.sense(sweep=(k % 2 == 0))
+            if self.loc is not None and k % FIX_EVERY_HOPS == FIX_EVERY_HOPS - 1:
+                self.fix()                       # corrections en route, not only at stops
+                x, y, h = self.pose
             path = plan(self.map, (x, y), goal)
             if path is None or len(path) < 2:
                 self.mark(f"no path to ({goal[0]:.2f}, {goal[1]:.2f})")
+                self.why = "no path"
                 return False
             wx, wy = path[1]
             leg = math.hypot(wx - x, wy - y)
@@ -167,8 +175,16 @@ class Navigator:
             free = self.sense(sweep=False)
             room = free - config.NAV_FRONT_CLEAR_M
             if room < 0.05:
-                # something the map didn't know is right ahead: it's in the map now, replan
+                # something the map didn't know is right ahead: mark it lethal (one
+                # weak sonar reading doesn't flip the cells, and the planner would
+                # choose the same path again), then replan
                 self.mark(f"blocked ahead ({free:.2f} m): replanning")
+                self.map.add_contact(self.pose_rad(), ahead_m=free + SONAR_AHEAD_M)
+                blocked += 1
+                if blocked >= max_contacts * 2:
+                    self.mark("blocked too often: giving up on this goal")
+                    self.why = "blocked"
+                    return False
                 continue
             seconds = float(np.clip(min(leg, room) / SPEED_MPS, config.NAV_MIN_HOP_S, config.NAV_HOP_S))
             moved = self.hop(seconds)
@@ -181,5 +197,7 @@ class Navigator:
                 self.back_off()
                 if contacts >= max_contacts:
                     self.mark("too many contacts: giving up on this goal")
+                    self.why = "contacts"
                     return False
+        self.why = "hops"
         return False

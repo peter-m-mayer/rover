@@ -52,8 +52,10 @@ class RoomMap:
         m = cls(xlo, -margin, X + margin, Y + margin, res)
         walls = [((0, 0), (X, 0)), ((X, 0), (X, Y)), ((X, Y), (0, Y))]
         if a:
-            ax0, ay1 = a["x0"] * IN, a["y1"] * IN
-            walls += [((0, Y), (0, ay1)), ((0, ay1), (ax0, ay1)), ((ax0, ay1), (ax0, 0)), ((ax0, 0), (0, 0))]
+            # the alcove opens in the x=0 wall between y0 and y1
+            ax0, ay0, ay1 = a["x0"] * IN, a["y0"] * IN, a["y1"] * IN
+            walls += [((0, Y), (0, ay1)), ((0, ay1), (ax0, ay1)), ((ax0, ay1), (ax0, ay0)),
+                      ((ax0, ay0), (0, ay0)), ((0, ay0), (0, 0))]
             mir = a.get("sliding_door_mirror")
             if mir:
                 walls.append(((mir["x"] * IN, mir["y0"] * IN), (mir["x"] * IN, mir["y1"] * IN)))

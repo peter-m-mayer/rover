@@ -71,18 +71,24 @@ def main(argv=None):
             nav.start(fix)
             t0 = time.monotonic()
             for leg, tag in enumerate(int(v) for v in args.route.split(",")):
-                x, y, _ = nav.pose
-                nav.sense()
-                vp = tag_viewpoint(nav.map, survey, tag, (x, y))
+                reached, vp = False, None
+                for attempt in range(3):         # the map grows en route: re-pick an unreachable viewpoint
+                    x, y, _ = nav.pose
+                    nav.sense()
+                    vp = tag_viewpoint(nav.map, survey, tag, (x, y))
+                    if vp is None:
+                        break
+                    goal, face, _ = vp
+                    rec.mark(f"move leg {leg} to tag {tag}")
+                    print(f"leg {leg}: to tag {tag} viewpoint ({goal[0]:.2f}, {goal[1]:.2f})", flush=True)
+                    reached = nav.go_to(goal)
+                    if reached or nav.why != "no path":
+                        break
                 if vp is None:
                     print(f"leg {leg}: no reachable viewpoint for tag {tag}", flush=True)
                     rec.mark(f"tourstop " + json.dumps({"leg": leg, "tag": tag, "reached": False, "fix": None,
                                                          "why": "no viewpoint"}))
                     continue
-                goal, face, _ = vp
-                rec.mark(f"move leg {leg} to tag {tag}")
-                print(f"leg {leg}: to tag {tag} viewpoint ({goal[0]:.2f}, {goal[1]:.2f})", flush=True)
-                reached = nav.go_to(goal)
                 nav.turn_to_heading(face)
                 rec.mark(f"end leg {leg} to tag {tag}")
                 time.sleep(0.4)

@@ -26,9 +26,10 @@ def test_survey_seeds_walls_and_outside(office):
     assert occ[m.cell(X / 2, 0.0)[::-1]]            # south wall
     assert occ[m.cell(X / 2, Y + 0.2)[::-1]]        # outside
     assert not occ[m.cell(X / 2, Y / 2)[::-1]]      # middle of the room
-    assert not occ[m.cell(-0.5, 0.5)[::-1]]         # inside the alcove
-    assert occ[m.cell(0.0, 0.5)[::-1]]              # mirror door
-    assert not occ[m.cell(0.0, 1.3)[::-1]]          # alcove opening above the mirror
+    assert not occ[m.cell(-0.5, 4.4)[::-1]]         # inside the alcove
+    assert occ[m.cell(0.0, 4.5)[::-1]]              # mirror door, next to the ID 0 wall
+    assert not occ[m.cell(0.0, 3.6)[::-1]]          # alcove opening below the mirror
+    assert occ[m.cell(0.0, 2.0)[::-1]]              # x=0 wall south of the alcove
 
 
 def test_camera_scan_marks_free_and_hit(office):
@@ -84,7 +85,7 @@ def test_tag_viewpoint_avoids_furniture(office):
     tx, ty = tag3["x"] * IN, tag3["y"] * IN
     # furniture right in front of tag 3 (the old fixed standpoint)
     for x in np.arange(tx - 0.4, tx + 0.4, 0.02):
-        for y in np.arange(ty - 1.0, ty - 0.55, 0.02):
+        for y in np.arange(ty + 0.55, ty + 1.0, 0.02):
             i, j = m.cell(x, y)
             m.L[j, i] = 3.0
     vp = tag_viewpoint(m, office, 3, (2.0, 2.0))
@@ -92,7 +93,7 @@ def test_tag_viewpoint_avoids_furniture(office):
     (x, y), face, path = vp
     i, j = m.cell(x, y)
     assert np.isfinite(m.costmap()[j, i])
-    assert m.line_of_sight((x, y), (tx, ty - 0.05))
+    assert m.line_of_sight((x, y), (tx, ty + 0.05))
     assert abs(math.degrees(math.atan2(ty - y, tx - x)) - face) < 1e-6
 
 
@@ -157,3 +158,18 @@ def test_heading_history_interpolates():
     assert h.at(0.25) == pytest.approx(2.5)
     assert h.at(-1.0) == 0.0
     assert h.at(5.0) == 10.0
+
+
+def test_plan_wont_drive_through_obstacle_next_to_start(office):
+    # 2026-10-12: sonar saw something 0.2 m ahead but the weak sonar evidence never
+    # made it an obstacle, so the robot replanned the same path forever; the
+    # executor now marks it like a contact, and the plan must go around it
+    m = RoomMap.from_survey(office)
+    m.add_contact((2.0, 2.0, 0.0), ahead_m=0.16)
+    path = plan(m, (2.0, 2.0), (3.0, 2.0))
+    assert path is not None
+    occ = m.occupied()
+    for (x0, y0), (x1, y1) in zip(path, path[1:]):
+        for s in np.linspace(0, 1, 40):
+            i, j = m.cell(x0 + s * (x1 - x0), y0 + s * (y1 - y0))
+            assert not occ[j, i]

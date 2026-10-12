@@ -2,20 +2,54 @@
   "name": "office",
   "surveyed": "2026-10-11",
   "units_in": "inches (as measured); *_m fields are metres",
-  "origin": "x=0 is the main room's left wall (the wall with the alcove opening), y=0 the wall ID 0 is on; +x along the ID 0 wall toward ID 1",
+  "origin": "x=0 is the main room's left wall (the wall with the alcove opening), y=0 the wall IDs 2 and 3 are on; +x toward ID 1, +y toward the ID 0 wall (z up, right-handed). Standing in the room facing ID 0, the alcove and its mirror door are on your left.",
   "xmax_in": 237.0,
   "ymax_in": 195.0,
   "xmax_note": "12 ft + 93 in, measured from the ID 0 bullseye in +x -- CHECK: from the x=0 wall or from ID 0 (x=4.25)?",
   "marker_center_height_in": 10.25,
   "markers": {
-    "0": {"x": 4.25,  "y": 0.0,   "facing": "+y"},
-    "1": {"x": 237.0, "y": 34.0,  "facing": "-x"},
-    "2": {"x": 194.5, "y": 195.0, "facing": "-y"},
-    "3": {"x": 139.0, "y": 195.0, "facing": "-y"},
-    "4": {"x": 0.0,   "y": 118.0, "facing": "+x"},
-    "5": {"x": -51.0, "y": 51.0,  "facing": "+x"}
+    "0": {
+      "x": 4.25,
+      "y": 195.0,
+      "facing": "-y"
+    },
+    "1": {
+      "x": 237.0,
+      "y": 161.0,
+      "facing": "-x"
+    },
+    "2": {
+      "x": 194.5,
+      "y": 0.0,
+      "facing": "+y"
+    },
+    "3": {
+      "x": 139.0,
+      "y": 0.0,
+      "facing": "+y"
+    },
+    "4": {
+      "x": 0.0,
+      "y": 77.0,
+      "facing": "+x"
+    },
+    "5": {
+      "x": -51.0,
+      "y": 144.0,
+      "facing": "+x"
+    }
   },
-  "alcove": {"x0": -51.0, "x1": 0.0, "y0": 0.0, "y1": 72.0,
-             "sliding_door_mirror": {"x": 0.0, "y0": 0.0, "y1": 36.0},
-             "note": "mirror in the opening y 0..36 -- a hard wall for the map; reflects floor, so camera free-space must ignore it"}
+  "alcove": {
+    "x0": -51.0,
+    "x1": 0.0,
+    "y0": 123.0,
+    "y1": 195.0,
+    "sliding_door_mirror": {
+      "x": 0.0,
+      "y0": 159.0,
+      "y1": 195.0
+    },
+    "note": "mirror door in the opening, next to the ID 0 wall -- a hard wall for the map; reflects floor, so camera free-space must ignore it"
+  },
+  "frame_fix": "2026-10-12: the first transcription put y=0 on the ID 0 wall with +y into the room, which is a mirror image of the room (left-handed). Tags facing +-y then read 180 deg off the gyro. Peter's measurements are unchanged; y here = 195 - y as measured from the ID 0 wall."
 }

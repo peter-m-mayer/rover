@@ -32,9 +32,11 @@ START_ESCAPE_COST = 20.0
 
 
 class CostField:
-    """Single-source shortest paths from `start` (col, row) over `cost` (ny, nx)."""
+    """Single-source shortest paths from `start` (col, row) over `cost` (ny, nx).
+    `hard` (bool, ny x nx): obstacle cells that stay blocked even next to the
+    start (only the inflation margin around the start is waived)."""
 
-    def __init__(self, cost, start):
+    def __init__(self, cost, start, hard=None):
         from scipy.sparse import coo_matrix
         from scipy.sparse.csgraph import dijkstra
         ny, nx = cost.shape
@@ -44,8 +46,12 @@ class CostField:
         if not self.ok:
             return
         r = START_FREE_CELLS
-        blk = c[max(0, sj - r):sj + r + 1, max(0, si - r):si + r + 1]
-        blk[np.isinf(blk)] = START_ESCAPE_COST
+        win = (slice(max(0, sj - r), sj + r + 1), slice(max(0, si - r), si + r + 1))
+        blk = c[win]
+        waive = np.isinf(blk)
+        if hard is not None:
+            waive &= ~hard[win]
+        blk[waive] = START_ESCAPE_COST
         idx = np.arange(nx * ny).reshape(ny, nx)
         rows, cols, w = [], [], []
         for dj, di, step in [(0, 1, 1.0), (1, 0, 1.0), (1, 1, SQ2), (1, -1, SQ2)]:
@@ -125,7 +131,7 @@ def plan(m, start_xy, goal_xy, cost=None, field=None):
     """Room-frame path from start to goal on RoomMap m, or None."""
     if field is None:
         cost = m.costmap() if cost is None else cost
-        field = CostField(cost, m.cell(*start_xy))
+        field = CostField(cost, m.cell(*start_xy), hard=m.occupied())
     cells = field.cells_to(m.cell(*goal_xy))
     if cells is None:
         return None
@@ -138,7 +144,7 @@ def plan(m, start_xy, goal_xy, cost=None, field=None):
 def tag_viewpoint(m, survey, tag_id, start_xy, rmin=0.5, rmax=1.4, max_angle_deg=35, cost=None):
     """Best place to stand to read tag `tag_id`: returns (point, facing_deg, path) or None."""
     cost = m.costmap() if cost is None else cost
-    field = CostField(cost, m.cell(*start_xy))
+    field = CostField(cost, m.cell(*start_xy), hard=m.occupied())
     t = survey["markers"][str(tag_id)]
     n = np.array(FACING[t["facing"]][:2], float)
     tag = np.array([t["x"] * IN, t["y"] * IN])

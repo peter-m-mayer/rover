@@ -199,8 +199,8 @@ def main(argv=None):
         sv = loc.survey
         X, Y = sv["xmax_in"] * IN, sv["ymax_in"] * IN
         a = sv["alcove"]
-        outline = np.array([(0, 0), (X, 0), (X, Y), (0, Y), (0, a["y1"] * IN), (a["x0"] * IN, a["y1"] * IN),
-                            (a["x0"] * IN, 0), (0, 0)])
+        ay0, ay1, ax0 = a["y0"] * IN, a["y1"] * IN, a["x0"] * IN
+        outline = np.array([(0, 0), (X, 0), (X, Y), (0, Y), (0, ay1), (ax0, ay1), (ax0, ay0), (0, ay0), (0, 0)])
         scale = 100                                   # px per metre
         W, H = int((X + 2.2) * scale), int((Y + 1.0) * scale)
         canvas = np.full((H, W, 3), 255, np.uint8)
@@ -212,7 +212,10 @@ def main(argv=None):
                     x, y = rmap.centre(i, j)
                     cv2.rectangle(canvas, to_px(x - res_ / 2, y - res_ / 2), to_px(x + res_ / 2, y + res_ / 2), colour, -1)
         cv2.polylines(canvas, [np.array([to_px(x, y) for x, y in outline], np.int32)], False, (200, 120, 0), 2)
-        cv2.line(canvas, to_px(0, 0), to_px(0, 36 * IN), (255, 160, 60), 5)            # mirror door
+        mir = a.get("sliding_door_mirror")
+        if mir:
+            cv2.line(canvas, to_px(mir["x"] * IN, mir["y0"] * IN), to_px(mir["x"] * IN, mir["y1"] * IN),
+                     (255, 160, 60), 5)                                                 # mirror door
         for k, m in sv["markers"].items():
             q = to_px(m["x"] * IN, m["y"] * IN)
             cv2.rectangle(canvas, (q[0] - 5, q[1] - 5), (q[0] + 5, q[1] + 5), (0, 0, 200), -1)
