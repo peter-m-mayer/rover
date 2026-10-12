@@ -166,8 +166,9 @@ class RoomMap:
         self.contact *= factor
 
     # ---- products ----------------------------------------------------------------
-    def occupied(self):
-        return self.wall | (self.L > OCC_T) | (self.contact > 0.3)
+    def occupied(self, contacts=True):
+        occ = self.wall | (self.L > OCC_T)
+        return occ | (self.contact > 0.3) if contacts else occ
 
     def free(self):
         return ~self.occupied() & (self.L < FREE_T)
@@ -175,11 +176,12 @@ class RoomMap:
     def unknown(self):
         return ~self.occupied() & ~self.free()
 
-    def costmap(self, radius_m=ROBOT_RADIUS_M, soft_m=SOFT_MARGIN_M, unknown_cost=3.0):
+    def costmap(self, radius_m=ROBOT_RADIUS_M, soft_m=SOFT_MARGIN_M, unknown_cost=3.0, contacts=True):
         """Per-cell traversal cost: inf within radius_m of an obstacle, a falling
-        penalty in the soft band beyond it, unknown_cost in unseen cells, 1 elsewhere."""
+        penalty in the soft band beyond it, unknown_cost in unseen cells, 1 elsewhere.
+        contacts=False leaves out contact marks (the relaxed plan for escaping)."""
         import cv2
-        occ = self.occupied().astype(np.uint8)
+        occ = self.occupied(contacts).astype(np.uint8)
         dist = cv2.distanceTransform((1 - occ).astype(np.uint8), cv2.DIST_L2, 5) * self.res
         cost = np.ones(occ.shape, np.float32)
         cost[self.unknown()] = unknown_cost

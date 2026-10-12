@@ -29,6 +29,7 @@ from .tag_localizer import FACING, IN
 SQ2 = math.sqrt(2.0)
 START_FREE_CELLS = 4
 START_ESCAPE_COST = 20.0
+RELAXED_RADIUS_M = 0.09       # escape plans: contacts ignored, smaller margin
 
 
 class CostField:
@@ -127,11 +128,21 @@ def shortcut(m, pts, clear=None, need_m=ROBOT_RADIUS_M + 0.04):
     return out
 
 
-def plan(m, start_xy, goal_xy, cost=None, field=None):
+def costs(m, relaxed=False):
+    """(cost, hard) for planning. relaxed: contact marks left out and a smaller
+    margin -- for when the normal plan finds no way out (2026-10-12 the robot
+    sat in a corner boxed in by its own contact marks and every leg failed)."""
+    if relaxed:
+        return m.costmap(radius_m=RELAXED_RADIUS_M, contacts=False), m.occupied(contacts=False)
+    return m.costmap(), m.occupied()
+
+
+def plan(m, start_xy, goal_xy, cost=None, field=None, relaxed=False):
     """Room-frame path from start to goal on RoomMap m, or None."""
     if field is None:
-        cost = m.costmap() if cost is None else cost
-        field = CostField(cost, m.cell(*start_xy), hard=m.occupied())
+        c, hard = costs(m, relaxed)
+        cost = c if cost is None else cost
+        field = CostField(cost, m.cell(*start_xy), hard=hard)
     cells = field.cells_to(m.cell(*goal_xy))
     if cells is None:
         return None
@@ -141,10 +152,11 @@ def plan(m, start_xy, goal_xy, cost=None, field=None):
     return shortcut(m, pts)
 
 
-def tag_viewpoint(m, survey, tag_id, start_xy, rmin=0.5, rmax=1.4, max_angle_deg=35, cost=None):
+def tag_viewpoint(m, survey, tag_id, start_xy, rmin=0.5, rmax=1.4, max_angle_deg=35, cost=None, relaxed=False):
     """Best place to stand to read tag `tag_id`: returns (point, facing_deg, path) or None."""
-    cost = m.costmap() if cost is None else cost
-    field = CostField(cost, m.cell(*start_xy), hard=m.occupied())
+    c, hard = costs(m, relaxed)
+    cost = c if cost is None else cost
+    field = CostField(cost, m.cell(*start_xy), hard=hard)
     t = survey["markers"][str(tag_id)]
     n = np.array(FACING[t["facing"]][:2], float)
     tag = np.array([t["x"] * IN, t["y"] * IN])

@@ -173,3 +173,13 @@ def test_plan_wont_drive_through_obstacle_next_to_start(office):
         for s in np.linspace(0, 1, 40):
             i, j = m.cell(x0 + s * (x1 - x0), y0 + s * (y1 - y0))
             assert not occ[j, i]
+
+
+def test_relaxed_plan_escapes_own_contact_marks(office):
+    # 2026-10-12: boxed in by its own contact marks in a corner, every leg failed
+    m = RoomMap.from_survey(office)
+    for th in np.radians(np.arange(0, 360, 45)):
+        m.add_contact((2.0, 2.0, th), ahead_m=0.2)
+    m.add_footprint(2.0, 2.0)
+    assert plan(m, (2.0, 2.0), (3.0, 2.0)) is None
+    assert plan(m, (2.0, 2.0), (3.0, 2.0), relaxed=True) is not None

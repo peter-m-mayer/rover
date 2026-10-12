@@ -163,6 +163,10 @@ class Navigator:
                 self.fix()                       # corrections en route, not only at stops
                 x, y, h = self.pose
             path = plan(self.map, (x, y), goal)
+            if path is None:
+                path = plan(self.map, (x, y), goal, relaxed=True)
+                if path is not None:
+                    self.mark("no normal path: using the relaxed plan (contacts ignored, tight margin)")
             if path is None or len(path) < 2:
                 self.mark(f"no path to ({goal[0]:.2f}, {goal[1]:.2f})")
                 self.why = "no path"
@@ -180,6 +184,8 @@ class Navigator:
                 # choose the same path again), then replan
                 self.mark(f"blocked ahead ({free:.2f} m): replanning")
                 self.map.add_contact(self.pose_rad(), ahead_m=free + SONAR_AHEAD_M)
+                if free < 0.12:
+                    self.back_off()              # too close to turn freely
                 blocked += 1
                 if blocked >= max_contacts * 2:
                     self.mark("blocked too often: giving up on this goal")

@@ -77,6 +77,8 @@ def main(argv=None):
                     nav.sense()
                     vp = tag_viewpoint(nav.map, survey, tag, (x, y))
                     if vp is None:
+                        vp = tag_viewpoint(nav.map, survey, tag, (x, y), relaxed=True)
+                    if vp is None:
                         break
                     goal, face, _ = vp
                     rec.mark(f"move leg {leg} to tag {tag}")
