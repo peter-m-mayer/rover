@@ -31,7 +31,7 @@ from .m1_run import load_intrinsics
 from .nav_executor import Navigator, install_stop_handlers
 from .planner import tag_viewpoint
 from .recorder import RunRecorder
-from .tag_localizer import TagLocalizer, load_survey
+from .tag_localizer import IN, TagLocalizer, load_survey
 
 
 def anchor_fix(nav, step=45):
@@ -42,6 +42,33 @@ def anchor_fix(nav, step=45):
             return f
         turn_to(nav.rig.act, nav.rig.hd, nav.rig.hd.heading_deg + step)
     return None
+
+
+def fix_at_stop(nav, survey, tag, face, step_m=0.3, min_range_m=0.7):
+    """Tag fix at a tour stop, trying harder than one look: as planned, then
+    turned +-20 deg, then a hop closer (2026-10-12 baseline: tags 2 and 3 were
+    seen at 1.57 m, just past TAG_MAX_RANGE_M, and tag 1 was out of view).
+    Returns (fix or None, the dead-reckoning pose just before the fix)."""
+    pose = nav.pose
+    fix = nav.fix()
+    for off in (20, -20):
+        if fix is not None:
+            break
+        nav.turn_to_heading(face + off)
+        pose = nav.pose
+        fix = nav.fix()
+    if fix is None:
+        m = survey["markers"][str(tag)]
+        tx, ty = m["x"] * IN, m["y"] * IN
+        x, y, _ = nav.pose
+        d = math.hypot(tx - x, ty - y)
+        if d > min_range_m + step_m:
+            nav.mark(f"no fix of tag {tag} at {d:.2f} m: moving {step_m} m closer")
+            nav.go_to((x + step_m * (tx - x) / d, y + step_m * (ty - y) / d), tol=0.08, max_hops=6)
+            nav.turn_to_heading(math.degrees(math.atan2(ty - y, tx - x)))
+            pose = nav.pose
+            fix = nav.fix()
+    return fix, pose
 
 
 def main(argv=None):
@@ -101,8 +128,7 @@ def main(argv=None):
                 nav.turn_to_heading(face)
                 rec.mark(f"end leg {leg} to tag {tag}")
                 time.sleep(0.4)
-                x, y, h = nav.pose
-                fix = nav.fix()
+                fix, (x, y, h) = fix_at_stop(nav, survey, tag, face)
                 row = {"leg": leg, "tag": tag, "reached": reached, "dr": [x, y, h],
                        "t": time.monotonic() - t0, "fix": fix, "contacts": nav.contacts,
                        "why": None if reached else nav.why}

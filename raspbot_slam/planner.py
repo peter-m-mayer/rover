@@ -152,8 +152,10 @@ def plan(m, start_xy, goal_xy, cost=None, field=None, relaxed=False):
     return shortcut(m, pts)
 
 
-def tag_viewpoint(m, survey, tag_id, start_xy, rmin=0.5, rmax=1.4, max_angle_deg=35, cost=None, relaxed=False):
-    """Best place to stand to read tag `tag_id`: returns (point, facing_deg, path) or None."""
+def tag_viewpoint(m, survey, tag_id, start_xy, rmin=0.5, rmax=1.1, max_angle_deg=35, cost=None, relaxed=False):
+    """Best place to stand to read tag `tag_id`: returns (point, facing_deg, path) or None.
+    rmax 1.1 (was 1.4): with DR error a 1.4 m viewpoint put tags 2 and 3 at 1.57 m on
+    2026-10-12, past TAG_MAX_RANGE_M, and no fix was taken."""
     c, hard = costs(m, relaxed)
     cost = c if cost is None else cost
     field = CostField(cost, m.cell(*start_xy), hard=hard)
