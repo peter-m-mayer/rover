@@ -30,6 +30,7 @@ CAMERA_RANGE_M = 1.4          # free-space rays reach about this far
 MIN_GAIN_M2 = 0.15            # stop when the best goal would show less unseen floor than this
 FAILED_RADIUS_M = 0.4         # don't pick goals this close to one that failed
 FIX_SIGMA_M = 0.15            # detour to a tag when the position sigma passes this
+RETRY_SIGMA_M = 0.10          # after a failed detour, wait until sigma grows this much more
 
 
 def gain_map(m, range_m=CAMERA_RANGE_M):
@@ -70,9 +71,11 @@ def pick_goal(m, start_xy, failed=(), relaxed=False, step=2):
     return (float(xs[k]), float(ys[k])), float(g[k]), float(d[k])
 
 
-def nearest_tag_viewpoint(m, survey, start_xy):
+def nearest_tag_viewpoint(m, survey, start_xy, skip=()):
     best = None
     for tag in survey["markers"]:
+        if int(tag) in skip:
+            continue
         vp = tag_viewpoint(m, survey, int(tag), start_xy)
         if vp is None or vp[2] is None:
             continue
@@ -96,7 +99,7 @@ def main(argv=None):
     from .nav_executor import Navigator, check_stop, install_stop_handlers
     from .recorder import RunRecorder
     from .tag_localizer import TagLocalizer, load_survey
-    from .tag_tour import anchor_fix
+    from .tag_tour import anchor_fix, fix_at_stop
 
     p = argparse.ArgumentParser(description="Explore and map the room.")
     p.add_argument("--minutes", type=float, default=10.0)
@@ -114,6 +117,8 @@ def main(argv=None):
     rec.bus_lock = rig.bus_lock
     nav = Navigator(rig, rec, model, survey, tagloc, correct=args.correct, prior=args.prior)
     goals, failed = [], []
+    # a failed detour must not repeat at once (2026-10-12: 202 detours to tag 3 in a row)
+    detour_at, skip_tags = FIX_SIGMA_M, set()
     with rec:
         try:
             fix = anchor_fix(nav)
@@ -128,18 +133,27 @@ def main(argv=None):
             while time.monotonic() < t_end:
                 check_stop()
                 x, y, _ = nav.pose
-                if nav.loc is not None and nav.loc.sigma_xy() > FIX_SIGMA_M:
-                    best = nearest_tag_viewpoint(nav.map, survey, (x, y))
+                sigma = nav.loc.sigma_xy() if nav.loc is not None else 0.0
+                if sigma > detour_at:
+                    best = nearest_tag_viewpoint(nav.map, survey, (x, y), skip_tags)
                     if best is not None:
                         _, tag, (vp, face, _) = best
-                        nav.mark(f"position sigma {nav.loc.sigma_xy():.2f} m: detour to tag {tag}")
+                        nav.mark(f"position sigma {sigma:.2f} m: detour to tag {tag}")
+                        f = None
                         if nav.go_to(vp):
                             nav.turn_to_heading(face)
-                            f = nav.fix()
-                            nav.mark(f"tag {tag} fix: {'none' if f is None else f.get('result')}")
+                            f, _ = fix_at_stop(nav, survey, tag, face)
                         elif nav.why == "wedged":
                             break
-                        continue
+                        nav.mark(f"tag {tag} fix: {'none' if f is None else f.get('result')}")
+                        if f is not None and str(f.get("result", "")).startswith(("used", "position reset")):
+                            detour_at, skip_tags = FIX_SIGMA_M, set()
+                        else:
+                            detour_at = nav.loc.sigma_xy() + RETRY_SIGMA_M
+                            skip_tags.add(tag)
+                    else:
+                        detour_at = sigma + RETRY_SIGMA_M
+                        skip_tags = set()
                 g = pick_goal(nav.map, (x, y), failed)
                 if g is None:
                     g = pick_goal(nav.map, (x, y), failed, relaxed=True)
