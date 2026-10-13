@@ -34,16 +34,17 @@ from .recorder import RunRecorder
 from .tag_localizer import IN, TagLocalizer, load_survey
 
 
-ANCHOR_FAR_RANGE_M = 2.0      # second circle: a start anchor may use a farther tag
+ANCHOR_FAR_RANGE_M = 2.2      # second circle: a start anchor may use a farther tag ...
+ANCHOR_FAR_DZ_M = 0.08        # ... whose height wobbles more (tag 2 at 1.85 m: z 0.07-0.22, x/y within 5 cm)
 
 
 def anchor_fix(nav, step=45):
     """Turn the body (pan centred) until a tag gives a fix; full circle at most,
     then a second circle accepting tags out to ANCHOR_FAR_RANGE_M (a run left
     the robot 1.6 m from tag 2 and the next one couldn't start, 2026-10-12)."""
-    for max_range in (None, ANCHOR_FAR_RANGE_M):
+    for max_range, max_dz in ((None, None), (ANCHOR_FAR_RANGE_M, ANCHOR_FAR_DZ_M)):
         for k in range(360 // step):
-            f = nav.fix(max_range=max_range)
+            f = nav.fix(max_range=max_range, max_dz=max_dz)
             if f is not None:
                 return f
             turn_to(nav.rig.act, nav.rig.hd, nav.rig.hd.heading_deg + step)
