@@ -18,6 +18,8 @@ between furniture on 2026-10-11 (1 of 5 stops reached).
 
 import json
 import math
+import os
+import signal
 import time
 
 import numpy as np
@@ -31,25 +33,53 @@ from .online_odometry import OnlineOdometry
 from .planner import plan
 from .room_map import RoomMap
 
-SPEED_MPS = 0.28              # speed 50 on carpet
+SPEED_MPS = config.NAV_SPEED_MPS  # at config.NAV_SPEED on carpet (calibrate.py refits it)
 SONAR_AHEAD_M = 0.10          # sonar sits about this far ahead of the robot centre
 TURN_STALL_DEG = 20.0         # a turn that ends further off than this stalled
 FIX_EVERY_HOPS = 3            # try a tag fix (pan centred) every few hops
+STOP_FILE = "/tmp/rover_stop"  # touch it to stop a mission between hops
+WEDGED_EVENTS = 4             # this many troubles (stall, contact, block) in one spot = wedged
+WEDGED_RADIUS_M = 0.15
+WEDGED_SONAR_M = 0.03         # ... with the sonar range barely changing
+
+
+def install_stop_handlers():
+    """Make SIGINT and SIGTERM raise KeyboardInterrupt, so the mission's finally
+    block stops the motors and saves the map. A job started with `nohup ... &`
+    from a non-interactive shell inherits SIGINT ignored (that's why
+    `pkill -INT` didn't stop the 2026-10-12 tour)."""
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    try:
+        os.remove(STOP_FILE)
+    except OSError:
+        pass
+
+
+def check_stop():
+    if os.path.exists(STOP_FILE):
+        raise KeyboardInterrupt(f"{STOP_FILE} exists")
 
 
 class Navigator:
-    def __init__(self, rig, rec, model, survey, tagloc, correct=True, log=print):
+    def __init__(self, rig, rec, model, survey, tagloc, correct=True, log=print, prior=None):
         self.rig, self.rec, self.model = rig, rec, model
         self.survey, self.tagloc = survey, tagloc
         self.correct = correct
         self.log = log
         self.map = RoomMap.from_survey(survey)
+        if prior:
+            ok = self.map.load_prior(prior)
+            self.log(f"prior map {prior}: {'loaded' if ok else 'grid mismatch, ignored'}")
         self.fs = FreeSpaceScanner(model, max_range_m=1.6)
         self.odo = None
         self.loc = None
         self.contacts = 0
         self.path = []                       # driven (x, y) for plots
         self.why = None                      # why the last go_to gave up
+        self.last_us = float("nan")          # last sonar range (m)
+        self.troubles = []                   # (x, y, sonar) of recent stalls, contacts and blocks
+        self.events = {"contacts": 0, "blocked": 0, "turn_stalls": 0, "relaxed": 0}
 
     # ---- setup ---------------------------------------------------------------------
     def start(self, fix):
@@ -72,6 +102,16 @@ class Navigator:
     def pose_rad(self):
         x, y, h = self.pose
         return x, y, math.radians(h)
+
+    def save(self, folder):
+        """Map (npz + png) and nav.json (driven path, trouble counts, localizer stats) for score_run."""
+        import cv2
+        import os
+        self.map.save(os.path.join(folder, "room_map.npz"))
+        cv2.imwrite(os.path.join(folder, "room_map.png"), self.map.render(path=self.path, robot=self.pose_rad()))
+        with open(os.path.join(folder, "nav.json"), "w") as f:
+            json.dump({"path": [[round(x, 3), round(y, 3)] for x, y in self.path], "events": self.events,
+                       "localizer": self.loc.stats if self.loc else None}, f)
 
     # ---- sensing -------------------------------------------------------------------
     def frame_after(self, t, timeout=1.0):
@@ -97,6 +137,7 @@ class Navigator:
         offsets = (-40, 0, 40) if sweep else (0,)
         ahead = 9.9
         us = ultrasonic_mm(self.rig, 3) / 1000
+        self.last_us = us
         for off in offsets:
             frame = self.look(off)
             x, y, th = self.pose_rad()
@@ -139,6 +180,8 @@ class Navigator:
         _, _, h = self.pose
         err = turn_to(self.rig.act, self.rig.hd, self.rig.hd.heading_deg + wrap180(room_deg - h))
         if abs(err) > TURN_STALL_DEG and retry:
+            self.events["turn_stalls"] += 1
+            self.trouble()
             self.mark(f"turn stalled {err:+.0f} deg short: backing off and retrying")
             self.back_off()
             err = self.turn_to_heading(room_deg, retry=False)
@@ -157,11 +200,32 @@ class Navigator:
         drive_straight(self.rig.act, self.rig.hd, -config.NAV_SPEED, max(config.NAV_MIN_HOP_S, metres / SPEED_MPS))
         time.sleep(0.3)
 
+    def trouble(self):
+        """Note a stall, contact or block here; True when the robot is wedged:
+        several troubles in one spot with the sonar range barely changing
+        (2026-10-12: against the south wall, sonar 272 mm, every turn stalled)."""
+        x, y, _ = self.pose
+        self.troubles = [t for t in self.troubles
+                         if math.hypot(t[0] - x, t[1] - y) < WEDGED_RADIUS_M] + [(x, y, self.last_us)]
+        recent = self.troubles[-WEDGED_EVENTS:]
+        sonar = [t[2] for t in recent if t[2] == t[2]]
+        return (len(recent) >= WEDGED_EVENTS and len(sonar) == len(recent)
+                and max(sonar) - min(sonar) < WEDGED_SONAR_M)
+
+    def wedged(self):
+        if self.trouble():
+            self.mark("wedged: troubles in one spot with an unchanging sonar range; stopping")
+            self.why = "wedged"
+            return True
+        return False
+
     def go_to(self, goal, tol=0.15, max_hops=60, max_contacts=3):
-        """Drive to room point `goal`; True when within tol."""
+        """Drive to room point `goal`; True when within tol. On False, self.why
+        says why: no path, blocked, contacts, stuck, wedged or hops."""
         contacts = blocked = 0
         self.why = None
         for k in range(max_hops):
+            check_stop()
             x, y, h = self.pose
             dist = math.hypot(goal[0] - x, goal[1] - y)
             if dist < tol:
@@ -174,6 +238,7 @@ class Navigator:
             if path is None:
                 path = plan(self.map, (x, y), goal, relaxed=True)
                 if path is not None:
+                    self.events["relaxed"] += 1
                     self.mark("no normal path: using the relaxed plan (contacts ignored, tight margin)")
             if path is None or len(path) < 2:
                 self.mark(f"no path to ({goal[0]:.2f}, {goal[1]:.2f})")
@@ -184,6 +249,8 @@ class Navigator:
             bearing = math.degrees(math.atan2(wy - y, wx - x))
             if abs(wrap180(bearing - h)) > 6:
                 if abs(self.turn_to_heading(bearing)) > TURN_STALL_DEG:
+                    if self.wedged():
+                        return False
                     self.mark("can't turn here: giving up on this goal")
                     self.why = "stuck"
                     return False
@@ -195,6 +262,9 @@ class Navigator:
                 # choose the same path again), then replan
                 self.mark(f"blocked ahead ({free:.2f} m): replanning")
                 self.map.add_contact(self.pose_rad(), ahead_m=free + SONAR_AHEAD_M)
+                self.events["blocked"] += 1
+                if self.wedged():
+                    return False
                 if free < 0.12:
                     self.back_off()              # too close to turn freely
                 blocked += 1
@@ -211,7 +281,10 @@ class Navigator:
                 contacts += 1
                 self.contacts += 1
                 self.mark(f"contact: hop moved {moved * 100:.0f} cm of {expected * 100:.0f}")
+                self.events["contacts"] += 1
                 self.map.add_contact(self.pose_rad())
+                if self.wedged():
+                    return False
                 self.back_off()
                 if contacts >= max_contacts:
                     self.mark("too many contacts: giving up on this goal")

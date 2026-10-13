@@ -13,6 +13,14 @@ seeded lethal and never cleared: the camera sees "floor" in the mirror, and the
 sonar slides off walls at shallow angles. Contacts are lethal too but fade
 slowly (furniture gets moved; a bad pose can put one in the wrong cell).
 
+Obstacles also persist: log-odds alone let later free rays erase furniture
+(a floor boundary that jitters by a cell marks yesterday's hit cell free), so
+the four 2026-10-12 runs merged into thin edges. Each cell also counts camera
+hits, the distinct places they were seen from, and free rays through it. A
+cell hit at least SOLID_HITS times from two places, and in at least
+SOLID_FRAC of its observations, is solid until the robot drives over it.
+These counts are what a saved map carries into the next run (load_prior).
+
 Why both sensors: the sonar can't see low things (the round desk's ring base,
 2026-10-11) and the camera floor model can't see overhangs (a desk top); a cell
 either one calls occupied stays occupied until seen free many times.
@@ -29,6 +37,10 @@ OCC_T, FREE_T = 0.8, -0.5           # log-odds thresholds for occupied / free
 ROBOT_RADIUS_M = 0.13               # chassis half-diagonal (~0.24 x 0.16 m) plus camera head
 SOFT_MARGIN_M = 0.10                # extra cost band outside the lethal inflation
 SONAR_HALF_ANGLE = math.radians(7.5)
+SOLID_HITS = 3                      # camera hits needed for a persistent obstacle ...
+SOLID_FRAC = 0.25                   # ... in at least this fraction of the cell's observations
+VIEW_CELL_M = 0.2                   # hits from robot positions in different cells this size = different views
+PRIOR_SHRINK = 0.5                  # a prior map's log-odds are scaled by this, so live evidence wins
 
 
 class RoomMap:
@@ -42,6 +54,10 @@ class RoomMap:
         self.wall = np.zeros((self.ny, self.nx), bool)          # surveyed, permanent
         self.contact = np.zeros((self.ny, self.nx), np.float32)  # 1 = fresh contact, fades
         self.seen = np.zeros((self.ny, self.nx), bool)
+        self.hits = np.zeros((self.ny, self.nx), np.int32)      # camera "obstacle here" count
+        self.misses = np.zeros((self.ny, self.nx), np.int32)    # free rays through the cell
+        self.views = np.zeros((self.ny, self.nx), np.int8)      # distinct places the hits came from (capped)
+        self.hitsrc = np.full((self.ny, self.nx), -1, np.int32)  # code of the place of the last hit
 
     # ---- construction -----------------------------------------------------------
     @classmethod
@@ -102,19 +118,31 @@ class RoomMap:
         return cells
 
     # ---- evidence ----------------------------------------------------------------
-    def ray(self, x0, y0, x1, y1, hit, w_free=1.0, w_occ=1.0):
+    def view_code(self, x, y):
+        """Code of the VIEW_CELL_M cell the robot is in (hits from different codes = different views)."""
+        return int(math.floor(x / VIEW_CELL_M)) * 1000 + int(math.floor(y / VIEW_CELL_M))
+
+    def ray(self, x0, y0, x1, y1, hit, w_free=1.0, w_occ=1.0, src=None):
+        """src: view code of the observer; given (camera rays), the end cell's hit counts toward persistence."""
         cells = self._ray_cells(x0, y0, x1, y1)
         end = cells[-1]
         for i, j in cells[:-1]:
             if self.inside(i, j):
                 self.L[j, i] = max(L_MIN, self.L[j, i] + w_free * L_FREE)
+                self.misses[j, i] += 1
                 self.seen[j, i] = True
         i, j = end
         if self.inside(i, j):
             if hit:
                 self.L[j, i] = min(L_MAX, self.L[j, i] + w_occ * L_OCC)
+                if src is not None:
+                    self.hits[j, i] += 1
+                    if self.hitsrc[j, i] != src:
+                        self.hitsrc[j, i] = src
+                        self.views[j, i] = min(100, self.views[j, i] + 1)
             else:
                 self.L[j, i] = max(L_MIN, self.L[j, i] + w_free * L_FREE)
+                self.misses[j, i] += 1
             self.seen[j, i] = True
 
     def add_camera_scan(self, pose, bearings, ranges, hits, cam_offset_m=0.06):
@@ -122,11 +150,12 @@ class RoomMap:
         The camera sits ~6 cm ahead of the turning centre."""
         x, y, th = pose
         cx, cy = x + cam_offset_m * math.cos(th), y + cam_offset_m * math.sin(th)
+        src = self.view_code(x, y)
         for b, r, h in zip(bearings, ranges, hits):
             if b != b:
                 continue
             a = th + b
-            self.ray(cx, cy, cx + r * math.cos(a), cy + r * math.sin(a), bool(h))
+            self.ray(cx, cy, cx + r * math.cos(a), cy + r * math.sin(a), bool(h), src=src)
 
     def add_sonar(self, pose, range_m, max_m=2.5, min_m=0.03):
         """Forward sonar as a cone: free inside it, occupied on its arc (weak per ray)."""
@@ -160,14 +189,21 @@ class RoomMap:
             return
         self.L[j0:j1, i0:i1] = np.minimum(self.L[j0:j1, i0:i1], L_MIN / 2)
         self.contact[j0:j1, i0:i1] = 0.0
+        self.hits[j0:j1, i0:i1] = 0                 # driven over: it isn't an obstacle
+        self.views[j0:j1, i0:i1] = 0
         self.seen[j0:j1, i0:i1] = True
 
     def decay_contacts(self, factor=0.98):
         self.contact *= factor
 
     # ---- products ----------------------------------------------------------------
+    def solid(self):
+        """Persistent obstacles: seen often enough, from two places, to survive free rays."""
+        return ((self.hits >= SOLID_HITS) & (self.views >= 2)
+                & (self.hits >= SOLID_FRAC * (self.hits + self.misses)))
+
     def occupied(self, contacts=True):
-        occ = self.wall | (self.L > OCC_T)
+        occ = self.wall | (self.L > OCC_T) | self.solid()
         return occ | (self.contact > 0.3) if contacts else occ
 
     def free(self):
@@ -207,7 +243,7 @@ class RoomMap:
         import cv2
         img = np.full((self.ny, self.nx, 3), 200, np.uint8)
         img[self.free()] = (250, 250, 250)
-        img[(self.L > OCC_T) & ~self.wall] = (30, 30, 30)
+        img[((self.L > OCC_T) | self.solid()) & ~self.wall] = (30, 30, 30)
         img[(self.contact > 0.3) & ~self.wall] = (0, 0, 200)
         img[self.wall] = (160, 110, 40)
         img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
@@ -225,13 +261,39 @@ class RoomMap:
         return cv2.flip(img, 0)
 
     def save(self, path):
+        """Fresh contacts are saved as solid obstacles (they were felt, not guessed)."""
+        hits, views = self.hits.copy(), self.views.copy()
+        felt = self.contact > 0.3
+        hits[felt] = np.maximum(hits[felt], SOLID_HITS)
+        views[felt] = np.maximum(views[felt], 2)
         np.savez_compressed(path, L=self.L, wall=self.wall, contact=self.contact, seen=self.seen,
+                            hits=hits, misses=self.misses, views=views,
                             geom=np.array([self.x0, self.y0, self.res, self.nx, self.ny]))
 
     @classmethod
     def load(cls, path):
         d = np.load(path)
         x0, y0, res, nx, ny = d["geom"]
+        nx, ny = int(nx), int(ny)
         m = cls(x0, y0, x0 + nx * res, y0 + ny * res, res)
+        m.nx, m.ny = nx, ny
         m.L, m.wall, m.contact, m.seen = d["L"], d["wall"], d["contact"], d["seen"]
+        for k in ("hits", "misses", "views"):              # maps saved before 2026-10-12 lack them
+            if k in d:
+                setattr(m, k, d[k])
+        m.hitsrc = np.full((ny, nx), -1, np.int32)
         return m
+
+    def load_prior(self, path, shrink=PRIOR_SHRINK):
+        """Start from a saved map (an earlier run or offline/merge_runs.py): obstacle
+        counts and seen cells carry over, log-odds are shrunk so live evidence wins,
+        contacts start faded. Walls stay this map's (the survey may have changed).
+        Returns False (and changes nothing) if the grids don't match."""
+        p = RoomMap.load(path)
+        if (p.nx, p.ny) != (self.nx, self.ny) or abs(p.x0 - self.x0) > 1e-6 or abs(p.y0 - self.y0) > 1e-6:
+            return False
+        self.L = (p.L * shrink).astype(np.float32)
+        self.seen = p.seen | self.seen
+        self.hits, self.misses, self.views = p.hits.copy(), p.misses.copy(), p.views.copy()
+        self.contact = (p.contact * 0.5).astype(np.float32)
+        return True

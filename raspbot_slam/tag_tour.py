@@ -28,7 +28,7 @@ from .calibration import auto_camera_cal as acc
 from .floor_odometry import FloorModel
 from .heading import turn_to, wrap180
 from .m1_run import load_intrinsics
-from .nav_executor import Navigator
+from .nav_executor import Navigator, install_stop_handlers
 from .planner import tag_viewpoint
 from .recorder import RunRecorder
 from .tag_localizer import TagLocalizer, load_survey
@@ -48,7 +48,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Dead-reckoning self-test against the surveyed tags.")
     p.add_argument("--route", default="3,2,1,0,4,3")
     p.add_argument("--correct", action="store_true", help="apply tag fixes to the pose")
+    p.add_argument("--prior", default=None, help="start from a saved map (offline/merge_runs.py output)")
     args = p.parse_args(argv)
+    install_stop_handlers()
 
     K, dist = load_intrinsics()
     tagloc = TagLocalizer(K, dist)
@@ -57,7 +59,7 @@ def main(argv=None):
     rig = acc.Rig("/tmp", acc.TagTarget())
     rec = RunRecorder(camera=rig, imu=rig.imu, sensors=rig.sens, actuators=rig.act, label="tagtour")
     rec.bus_lock = rig.bus_lock
-    nav = Navigator(rig, rec, model, survey, tagloc, correct=args.correct)
+    nav = Navigator(rig, rec, model, survey, tagloc, correct=args.correct, prior=args.prior)
     results = []
     with rec:
         try:
@@ -86,6 +88,11 @@ def main(argv=None):
                     reached = nav.go_to(goal)
                     if reached or nav.why != "no path":
                         break
+                if nav.why == "wedged":
+                    rec.mark("tourstop " + json.dumps({"leg": leg, "tag": tag, "reached": False, "fix": None,
+                                                        "why": "wedged"}))
+                    print(f"leg {leg}: wedged; ending the tour (needs a hand)", flush=True)
+                    break
                 if vp is None:
                     print(f"leg {leg}: no reachable viewpoint for tag {tag}", flush=True)
                     rec.mark(f"tourstop " + json.dumps({"leg": leg, "tag": tag, "reached": False, "fix": None,
@@ -97,7 +104,8 @@ def main(argv=None):
                 x, y, h = nav.pose
                 fix = nav.fix()
                 row = {"leg": leg, "tag": tag, "reached": reached, "dr": [x, y, h],
-                       "t": time.monotonic() - t0, "fix": fix, "contacts": nav.contacts}
+                       "t": time.monotonic() - t0, "fix": fix, "contacts": nav.contacts,
+                       "why": None if reached else nav.why}
                 if fix is not None:
                     row["err_m"] = math.hypot(x - fix["x"], y - fix["y"])
                     row["err_deg"] = wrap180(h - fix["heading"])
@@ -108,8 +116,8 @@ def main(argv=None):
                     print(f"  DR ({x:.2f}, {y:.2f}, {h:+.0f}); no tag fix here", flush=True)
                 rec.mark("tourstop " + json.dumps(row))
                 results.append(row)
-        except KeyboardInterrupt:
-            print("interrupted")
+        except KeyboardInterrupt as e:
+            print(f"interrupted {e}")
         finally:
             rig.act.stop()
             nav.stop()
@@ -118,12 +126,18 @@ def main(argv=None):
     rig.cap.release()
     with open(os.path.join(rec.path, "tour.json"), "w") as f:
         json.dump(results, f, indent=1)
-    nav.map.save(os.path.join(rec.path, "room_map.npz"))
-    import cv2
-    cv2.imwrite(os.path.join(rec.path, "room_map.png"), nav.map.render(path=nav.path, robot=nav.pose_rad()))
+    nav.save(rec.path)
     ok = [r for r in results if r.get("fix")]
     print(f"done -> {rec.path}: {sum(r['reached'] for r in results)}/{len(results)} reached, "
           f"{len(ok)} fixes, contacts {nav.contacts}, localizer {nav.loc.stats if nav.loc else {}}")
+    try:
+        from .offline.score_run import score, summary_line
+        s = score(rec.path)
+        with open(os.path.join(rec.path, "score.json"), "w") as f:
+            json.dump(s, f, indent=1)
+        print("score:", summary_line(s))
+    except Exception as e:                       # scoring must never lose a run
+        print("score failed:", e)
     return 0
 
 

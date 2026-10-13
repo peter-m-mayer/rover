@@ -127,7 +127,11 @@ python3 -m raspbot_slam.m1_run --mode line # odometry test: drive at the most op
 python3 -m raspbot_slam.wander --seconds 180   # reactive wander, recorded (forward only, stops at 0.45 m)
 python3 -m raspbot_slam.align_check        # camera vs body from a 1.5 s straight drive (needs 0.9 m clear)
 python3 -m raspbot_slam.tag_tour           # self-test v2: plan to a viewpoint of each tag on the room map, compare DR with tag fixes
-                                            #   --correct applies fixes; saves room_map.npz/.png in the run folder
+                                            #   --correct applies fixes; --prior maps/office_prior.npz starts from
+                                            #   a merged map; saves room_map.npz/.png, nav.json, score.json
+python3 -m raspbot_slam.explore --minutes 10 --correct --prior maps/office_prior.npz   # map the room:
+                                            #   drive to where the most unseen floor is, look all round, repeat
+# Stop a tour/explore cleanly (motors off, map saved):  touch /tmp/rover_stop   (or pkill -TERM -f "[t]ag_tour")
 python3 -m raspbot_slam.recorder --seconds 60 --label static   # log a run (nothing moves):
                                            # datasets/slam_runs/<stamp>_<label>/ frames+IMU+sensors+power
 python3 -m catchaser.camera_zero           # floor-line vanishing point -> pan center + tilt level
@@ -171,6 +175,12 @@ python -m raspbot_slam.offline.eval_odometry datasets/slam_runs/<run>   # floor 
 python -m raspbot_slam.offline.build_map datasets/slam_runs/<run> --out map.png   # occupancy map
 python -m raspbot_slam.offline.eval_tags datasets/slam_runs/<run> --plot out.png --map   # DR vs tags + map over the survey
 python -m raspbot_slam.offline.eval_tags datasets/slam_runs/<run> --localizer            # + localizer gates / heading watchdog; per-tag survey check
+python -m raspbot_slam.offline.score_run datasets/slam_runs/<run> [--replay]   # reached, stop error, contacts,
+                                                  # coverage... -> score.json + datasets/slam_runs/scores.csv
+python -m raspbot_slam.offline.merge_runs <run> <run> ... --out maps/office_prior   # one prior map from many runs
+                                                  # (copy to the Pi: scp maps/office_prior.npz pi@192.168.0.41:rover/maps/)
+python -m raspbot_slam.offline.calibrate <run> <run> ... [--write]   # refit hop speed/lag, tag noise, drift
+                                                  # -> raspbot_slam/calibration/nav_calibration.json (config reads it)
 python -m raspbot_slam.calibration.make_targets   # docs/print/calibration_targets.pdf: checkerboard,
                                                   # ArUco tags 0-5 (150 mm), room survey sheet.
                                                   # Print at 100% and check the 100 mm bar.

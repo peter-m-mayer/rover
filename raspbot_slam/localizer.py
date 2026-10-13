@@ -20,11 +20,12 @@ import math
 
 import numpy as np
 
+from . import config
 from .heading import wrap180
 
-SIG_FIX_XY = 0.06            # m, a gated tag fix within ~1.5 m
+SIG_FIX_XY = config.LOC_SIG_FIX_XY_M      # m, a gated tag fix within ~1.5 m (calibrate.py refits it)
 SIG_FIX_TH = math.radians(3.0)
-ODO_XY_PER_M = 0.05          # m of position sigma per m travelled
+ODO_XY_PER_M = config.LOC_ODO_XY_PER_M    # m of position sigma per m travelled
 ODO_TH_PER_RAD = 0.02        # rad of heading sigma per rad turned
 GATE_CHI2 = 11.3             # 3 dof, p = 0.01
 

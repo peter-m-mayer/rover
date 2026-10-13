@@ -75,7 +75,6 @@ OBSTACLE_HEIGHT_MAX_M = 2.0        # above = ceiling, ignore
 WAYPOINT_TOLERANCE_M = 0.10        # 10 cm arrival threshold
 OBSTACLE_STOP_MM = 200             # ultrasonic emergency stop distance
 SCAN_INTERVAL_M = 0.50             # scanning stop every 50 cm of travel
-NAV_SPEED = 60                     # conservative motor speed (of 255 max)
 HEADING_PID_P = 0.8
 HEADING_PID_I = 0.0
 HEADING_PID_D = 0.01
@@ -95,7 +94,7 @@ CROSSTRACK_PID_D = 0.002
 CHASE_HEADING_KP = 40.0            # motor units per unit normalized error
 CHASE_HEADING_KI = 0.0             # off by default (avoids windup while searching)
 CHASE_HEADING_KD = 6.0             # damps overshoot on fast centroid swings
-CHASE_FORWARD_SPEED = NAV_SPEED    # base approach speed when cat is centered
+CHASE_FORWARD_SPEED = 60           # base approach speed when cat is centered
 CHASE_MAX_SPEED = 160              # cap on any single wheel magnitude (of 255);
                                    # raised from 120 to give prey lunges headroom
 CHASE_TURN_MAX = 90                # clamp on the turn command
@@ -287,7 +286,31 @@ TAG_MIN_FRAMES = 3                    # a fix is the median of >= this many good
 NAV_HOP_S = 0.5                       # longest heading-held hop (~0.14 m at speed 50)
 NAV_MIN_HOP_S = 0.35                  # 0.2 s hops moved only 1-3 cm on 2026-10-12 (read as false contacts)
 NAV_START_LAG_S = 0.12                # carpet stiction: a hop covers about speed * (t - lag)
-NAV_SPEED = 50
+NAV_SPEED = 50                        # motor speed (of 255) for navigation hops
+NAV_SPEED_MPS = 0.28                  # ... its ground speed on carpet once moving (sonar line runs 2026-10-11)
+LOC_SIG_FIX_XY_M = 0.06               # localizer: sigma of a gated tag fix within ~1.5 m
+LOC_ODO_XY_PER_M = 0.05               # localizer: position sigma growth per metre driven
 NAV_STALL_FRAC = 0.4                  # a hop moving less than this fraction of the expected distance is a stall
 NAV_FRONT_CLEAR_M = 0.25              # hop only into free space beyond this margin
 DEFAULT_MAP_DIR = "maps"
+
+
+# =============================================================================
+# Self-calibration overrides (offline/calibrate.py --write, refitted from runs)
+# =============================================================================
+def _load_nav_calibration():
+    import json
+    import os
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration", "nav_calibration.json")
+    names = ("NAV_SPEED_MPS", "NAV_START_LAG_S", "LOC_SIG_FIX_XY_M", "LOC_ODO_XY_PER_M")
+    try:
+        with open(p) as f:
+            cal = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    used = {k: float(cal[k]) for k in names if k in cal}
+    globals().update(used)
+    return used
+
+
+NAV_CALIBRATION = _load_nav_calibration()

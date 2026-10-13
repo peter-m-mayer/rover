@@ -33,6 +33,39 @@ Offline replay of the evening tour: the watchdog re-anchors the 174 deg heading 
   ~180 deg away. Unresolved: gyro slip vs survey. eval_tags now prints the per-tag check every run.
 - not yet run live (room dark, robot charging).
 
+Update, later on 2026-10-12:
+- **The 180 deg mystery was the survey.** Its frame was a mirror image of the room (left-handed). With
+  y flipped (`surveys/office.json` `frame_fix`), every tag agrees with the gyro. Replay of the day's runs needs
+  no heading resets, and the median error at fixes is 4 cm.
+- **Live tours.** The best tour (20261012_090828) reached 2 of 5 tags, with errors of 0.30 m and 0.14 m.
+- **Executor fixes since then:**
+  - sonar blocks are marked on the map;
+  - a relaxed escape plan when boxed in;
+  - a carpet start-lag hop model (0.28 m/s × (t − 0.12 s), minimum 0.35 s);
+  - stalled-turn detection.
+
+## Mission "learn the room" (2026-10-12 evening)
+
+Goal: each run improves the next: **run → automatic score → merge into a persistent map → refit the models →
+next run starts from that knowledge**. It succeeds when a tour after an explore run beats a tour before it.
+- `room_map.py`: persistent obstacles. A cell hit by the camera at least 3 times, from two places, in ≥ 25% of
+  its observations is solid until the robot drives over it, so furniture no longer erodes into thin edges.
+  `save()` keeps the counts, and contacts are saved as solid. `load_prior()` starts a run from a saved map.
+- `offline/score_run.py`: reached, stop error, contacts, blocks, stalled turns, give-ups by reason, distance,
+  coverage and wall offset, written to `score.json` and `datasets/slam_runs/scores.csv`. Tours and explore runs
+  print it at the end.
+- `offline/merge_runs.py`: replays runs (tag-corrected) into one prior map, `maps/office_prior.npz`.
+- `offline/calibrate.py`: refits the hop speed and start lag, tag-fix noise and dead-reckoning drift. Values go
+  to `calibration/nav_calibration.json`, which `config.py` reads, and only within sanity bounds.
+- `explore.py`: drives to the reachable place that would show the most unseen floor per metre of path, then
+  looks all round. It detours to a tag when the position sigma passes 0.15 m.
+- Safety:
+  - SIGINT and SIGTERM stop a mission cleanly. Jobs started with `nohup ... &` ignore SIGINT, which is why
+    `pkill -INT` failed.
+  - `touch /tmp/rover_stop` also stops a mission.
+  - Four troubles in one spot with an unchanging sonar range count as **wedged**: stop and ask for a hand.
+- Runs: baseline tour → explore → merge + calibrate → tour with `--prior` (same route `1,0,4,3,2`).
+
 ## Status (2026-10-11, end of first autonomous session)
 
 | Item | Result | Where |

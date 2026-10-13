@@ -41,22 +41,25 @@ def wrap(a):
     return (a + 180.0) % 360.0 - 180.0
 
 
-def main(argv=None):
-    import cv2
-    p = argparse.ArgumentParser(description="Dead reckoning vs surveyed tags.")
-    p.add_argument("run")
-    p.add_argument("--plot", default=None)
-    p.add_argument("--map", action="store_true")
-    p.add_argument("--localizer", action="store_true",
-                   help="run fixes through localizer.Localizer in scoring mode (gates, heading watchdog)")
-    args = p.parse_args(argv)
-
+def load_camera():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(here, "calibration", "camera_calibration.json")) as f:
         cal = json.load(f)
-    K, dist = np.array(cal["camera_matrix"]), np.array(cal["dist_coeffs"])
+    return np.array(cal["camera_matrix"]), np.array(cal["dist_coeffs"])
+
+
+def replay(run_dir, rmap=None, localizer=False, correct=False, log=print):
+    """Replay one run: dead reckoning anchored at the first tag fix, fix groups
+    scored against it, and the room map built if rmap is given (a RoomMap to add
+    to, so several runs can share one). With localizer=True the fixes also go
+    through localizer.Localizer; correct=True lets it move the pose (as
+    tag_tour --correct does live). Returns None without a tag fix, else a dict:
+    anchor, raw_fixes, groups, path (rows t, x, y, th), rows (one per fix group
+    after the anchor), stats (Localizer stats or None), gt, loc."""
+    import cv2
+    K, dist = load_camera()
     loc = TagLocalizer(K, dist)
-    run = RunLog(args.run)
+    run = RunLog(run_dir)
     # the camera mount changes between sessions: use the run's own settings
     rc = run.meta.get("config", {})
     pan_c = rc.get("SERVO_PAN_CENTER", config.SERVO_PAN_CENTER)
@@ -66,10 +69,10 @@ def main(argv=None):
     pans = [(float(c["t"]), float(c["a"])) for c in run.cmds if c["kind"] == "pan"]
     pt = np.array([q[0] for q in pans]); pv = np.array([q[1] for q in pans])
     st, sd = run.sensors.get("t", np.array([])), run.sensors.get("us_mm", np.array([]))
+    mapping = rmap is not None
 
     odo = FloorOdometry(model)
     fs = FreeSpaceScanner(model, max_range_m=1.6)
-    rmap = RoomMap.from_survey(loc.survey)
 
     class Odo:                                       # pose holder the Localizer can shift
         travelled_m = 0.0
@@ -110,8 +113,8 @@ def main(argv=None):
             anchor = (t, est)
             pose = np.array([est["x"], est["y"], math.radians(est["yaw"])])
             yaw_off = math.radians(est["yaw"]) - g
-            if args.localizer:
-                filt = Localizer(odo_shim, correct=False, log=lambda m: print(f"  [{now[0] - gt[0]:.1f}s] {m}"))
+            if localizer:
+                filt = Localizer(odo_shim, correct=correct, log=lambda m: log(f"  [{now[0] - gt[0]:.1f}s] {m}"))
         elif anchor is not None:
             h_prev = pose[2]
             pose[2] = g + yaw_off + global_shift[2]
@@ -128,7 +131,7 @@ def main(argv=None):
                 yaw_off += global_shift[2]; global_shift[2] = 0
                 pose[2] = g + yaw_off
             path.append((t, *pose))
-            if args.map and fs.hist is not None or (args.map and float(np.interp(t, st, sd)) > 500):
+            if mapping and (fs.hist is not None or float(np.interp(t, st, sd)) > 500):
                 if float(np.interp(t, st, sd)) > 500:
                     fs.learn(img)
                 still = r is not None and math.hypot(r[0], r[1]) < 0.003 and (dth is None or abs(dth) < 0.01)
@@ -144,8 +147,7 @@ def main(argv=None):
         prev_t = t
         now[0] = t
     if anchor is None:
-        print("no usable tag fix in this run")
-        return 1
+        return None
     path = np.array(path)
 
     # group fixes within 1 s, median each group
@@ -156,13 +158,10 @@ def main(argv=None):
         cur.append(f)
     if cur:
         groups.append(cur)
-    print(f"{len(raw_fixes)} fixes in {len(groups)} groups; anchored at t={anchor[0] - gt[0]:.1f}s "
-          f"({anchor[1]['x']:.2f}, {anchor[1]['y']:.2f}, {anchor[1]['yaw']:+.0f}) from tags {anchor[1]['tags']}")
-    print(f"\n{'t (s)':>7} {'travel m':>9} {'tags':>8} {'fix x,y':>13} {'DR x,y':>13} {'err m':>6} {'err deg':>8}")
-    scored = []
+    rows = []
     for gset in groups:
         t = float(np.median([f[0] for f in gset]))
-        if t <= anchor[0] + 0.5:
+        if t <= anchor[0] + 0.5 or not len(path):
             continue
         fx, fy = np.median([f[1] for f in gset]), np.median([f[2] for f in gset])
         fyaw = math.degrees(math.atan2(np.median([math.sin(math.radians(f[3])) for f in gset]),
@@ -170,17 +169,49 @@ def main(argv=None):
         i = min(np.searchsorted(path[:, 0], t), len(path) - 1)
         dx, dy, dh = path[i, 1], path[i, 2], math.degrees(path[i, 3])
         travel = float(np.sum(np.hypot(np.diff(path[: i + 1, 1]), np.diff(path[: i + 1, 2]))))
-        err_m, err_deg = math.hypot(dx - fx, dy - fy), wrap(dh - fyaw)
-        flag = "  OUTLIER (heading)" if abs(err_deg) > 15 else ""
-        print(f"{t - gt[0]:7.1f} {travel:9.2f} {str(gset[0][5]):>8} {fx:6.2f},{fy:5.2f} {dx:6.2f},{dy:5.2f} "
-              f"{err_m:6.2f} {err_deg:+8.1f}{flag}")
+        err_deg = wrap(dh - fyaw)
+        rows.append(dict(t=float(t - gt[0]), travel=travel, tags=list(gset[0][5]), fix=(float(fx), float(fy)),
+                         dr=(float(dx), float(dy)), err_m=float(math.hypot(dx - fx, dy - fy)),
+                         err_deg=float(err_deg), outlier=bool(abs(err_deg) > 15)))
+    return dict(anchor=anchor, raw_fixes=raw_fixes, groups=groups, path=path, rows=rows,
+                stats=dict(filt.stats) if filt else None, gt=gt, loc=loc)
+
+
+def main(argv=None):
+    import cv2
+    p = argparse.ArgumentParser(description="Dead reckoning vs surveyed tags.")
+    p.add_argument("run")
+    p.add_argument("--plot", default=None)
+    p.add_argument("--map", action="store_true")
+    p.add_argument("--localizer", action="store_true",
+                   help="run fixes through localizer.Localizer in scoring mode (gates, heading watchdog)")
+    p.add_argument("--correct", action="store_true", help="with --localizer: let the fixes move the pose")
+    args = p.parse_args(argv)
+
+    K, dist = load_camera()
+    rmap = RoomMap.from_survey(TagLocalizer(K, dist).survey) if args.map else None
+    out = replay(args.run, rmap, localizer=args.localizer, correct=args.correct)
+    if out is None:
+        print("no usable tag fix in this run")
+        return 1
+    anchor, raw_fixes, groups, path, gt, loc = (out[k] for k in ("anchor", "raw_fixes", "groups", "path", "gt", "loc"))
+    print(f"{len(raw_fixes)} fixes in {len(groups)} groups; anchored at t={anchor[0] - gt[0]:.1f}s "
+          f"({anchor[1]['x']:.2f}, {anchor[1]['y']:.2f}, {anchor[1]['yaw']:+.0f}) from tags {anchor[1]['tags']}")
+    print(f"\n{'t (s)':>7} {'travel m':>9} {'tags':>8} {'fix x,y':>13} {'DR x,y':>13} {'err m':>6} {'err deg':>8}")
+    scored = []
+    for r in out["rows"]:
+        flag = "  OUTLIER (heading)" if r["outlier"] else ""
+        print(f"{r['t']:7.1f} {r['travel']:9.2f} {str(r['tags']):>8} {r['fix'][0]:6.2f},{r['fix'][1]:5.2f} "
+              f"{r['dr'][0]:6.2f},{r['dr'][1]:5.2f} {r['err_m']:6.2f} {r['err_deg']:+8.1f}{flag}")
         if not flag:
-            scored.append((travel, err_m, err_deg))
+            scored.append((r["travel"], r["err_m"], r["err_deg"]))
     if scored:
         s = np.array(scored)
         print(f"\nscored {len(s)} fix groups over {s[:, 0].max():.1f} m travelled: "
               f"median error {np.median(s[:, 1]):.2f} m / {np.median(np.abs(s[:, 2])):.1f} deg, "
               f"max {s[:, 1].max():.2f} m; error per metre travelled {np.median(s[:, 1] / np.maximum(s[:, 0], 0.3)):.1%}")
+    if out["stats"]:
+        print("localizer:", out["stats"])
 
     # survey consistency: with one continuous gyro, (tag yaw - gyro) should be the
     # same constant for every tag; a tag whose offset differs is mis-surveyed (or
@@ -207,7 +238,7 @@ def main(argv=None):
         to_px = lambda x, y: (int((x + 1.7) * scale), int(H - (y + 0.5) * scale))
         if args.map:
             res_ = rmap.res
-            for mask, colour in ((rmap.free(), (235, 245, 235)), ((rmap.L > 0.8) & ~rmap.wall, (40, 40, 40))):
+            for mask, colour in ((rmap.free(), (235, 245, 235)), (rmap.occupied(contacts=False) & ~rmap.wall, (40, 40, 40))):
                 for (j, i) in np.argwhere(mask):
                     x, y = rmap.centre(i, j)
                     cv2.rectangle(canvas, to_px(x - res_ / 2, y - res_ / 2), to_px(x + res_ / 2, y + res_ / 2), colour, -1)
