@@ -14,7 +14,7 @@ never corrected, so a tag jump can't land inside a hop):
   - tag fix noise: the spread of single-frame fixes within each 1 s group
     -> LOC_SIG_FIX_XY_M (localizer measurement sigma)
   - dead-reckoning growth: uncorrected replay error at each fix group per
-    metre travelled since the anchor -> LOC_ODO_XY_PER_M
+    metre travelled since the anchor, 80th percentile -> LOC_ODO_XY_PER_M
 With --write, values that pass their sanity bounds and come from enough data
 go into raspbot_slam/calibration/nav_calibration.json, which config.py reads
 at import (so the Pi picks them up with git pull). Without it, prints only.
@@ -126,8 +126,10 @@ def main(argv=None):
         print(f"tag fix spread within a group: {sig * 100:.1f} cm (n {len(groups)} groups)")
         new["LOC_SIG_FIX_XY_M"] = max(sig, 0.03)        # floor: survey and pose errors don't average out
     if len(drift) >= 5:
-        d = float(np.median(drift))
-        print(f"uncorrected drift: {d:.1%} of distance (n {len(drift)} fix groups)")
+        # a sigma has to cover the bumps (0.2-1.2 m slips), not just clean driving: 80th percentile
+        d = float(np.percentile(drift, 80))
+        print(f"uncorrected drift: median {np.median(drift):.1%}, 80th percentile {d:.1%} of distance "
+              f"(n {len(drift)} fix groups)")
         new["LOC_ODO_XY_PER_M"] = d
 
     adopt = {}
