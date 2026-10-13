@@ -160,10 +160,10 @@ class Navigator:
         self.map.decay_contacts()
         return min(v for v in (us, ahead) if v == v)
 
-    def fix(self, frames=5):
+    def fix(self, frames=5, max_range=None):
         """Tag fix with the pan centred; feeds the Localizer. Returns the fix or None."""
         self.look(0)
-        ests = [e for e in (self.tagloc.localize(self.rig.gray()) for _ in range(frames)) if e]
+        ests = [e for e in (self.tagloc.localize(self.rig.gray(), max_range) for _ in range(frames)) if e]
         if len(ests) < config.TAG_MIN_FRAMES:
             return None
         med = {k: float(np.median([e[k] for e in ests])) for k in ("x", "y", "z", "yaw", "range_m")}

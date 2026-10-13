@@ -144,8 +144,8 @@ class TagLocalizer:
                 "pitch": math.degrees(math.asin(np.clip(axis[2], -1, 1))),
                 "tags": ids, "reproj_px": err, "range_m": rng}
 
-    def localize(self, gray):
-        return self.solve(self.detect(gray))
+    def localize(self, gray, max_range=None):
+        return self.solve(self.detect(gray), max_range=max_range)
 
 
 def robot_heading(cam_yaw_deg, pan):
