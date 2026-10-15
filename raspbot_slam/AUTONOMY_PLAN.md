@@ -66,6 +66,32 @@ next run starts from that knowledge**. It succeeds when a tour after an explore 
   - Four troubles in one spot with an unchanging sonar range count as **wedged**: stop and ask for a hand.
 - Runs: baseline tour → explore → merge + calibrate → tour with `--prior` (same route `1,0,4,3,2`).
 
+**Results (2026-10-12/14):**
+
+| Tour | Reached | Tag fixes at stops | Stop error median / max | Blocked / stalls / contacts | Distance |
+|---|---|---|---|---|---|
+| Before: `20261012_211537`, no prior, hand-tuned model | 5/5 | 2 | 0.34 / 0.50 m | 5 / 4 / 0 | 20.6 m |
+| After 1: `20261014_181342`, prior + calibration | 4/5 | 2 | 0.88 / 1.69 m | 11 / 2 / 0 | 14.9 m |
+| After 2: `20261014_185635`, + gyro bias re-learned | 4/5 | **4** | **0.20 / 0.28 m** | 10 / 5 / 0 | 15.1 m |
+
+- **Positioning:** after 2 is clearly better: twice the verified stops and 40% less error, with heading within
+  2 deg at every stop. **Getting around:** after 2 is not better. Tag 1 was missed because turns stalled at the
+  start, by a chair base, and there were more blocks.
+- **Gyro bias drift.** The gyro bias drifts as the IMU warms up: on after 1, +0.82 → +0.90 deg/s, which added
+  29 deg of heading error in 6 minutes. The localizer then gated the tag fix that showed it, because heading
+  sigma grew only with turning. Fixes:
+  - `GyroHeading(still_fn=act.still_s)` re-learns the bias whenever the motors have been off for 0.8 s. Parked
+    for 130 s, drift was 0.6 deg with this against 6.4 deg without it.
+  - The localizer's sigma now grows linearly, so it no longer depends on how often `predict()` runs.
+- **Explore 1** "wedged" itself because a goal sat 0.2 m in front of a wastebasket. Fixes: a block within 0.35 m of
+  the goal now counts as arrived, and wedged needs a contact or a turn stall.
+- **Battery proxy:** the hop-speed check at mission start, against 0.35 m/s, read 98% → 92% → 87% over the
+  afternoon's runs.
+- **Still open:**
+  - The start position isn't controlled. Each tour starts where the last run ended, while the baseline started
+    by tag 0.
+  - Blocks and turn stalls by low furniture (the chair base and the wastebasket) are the main cause of failed legs.
+
 ## Status (2026-10-11, end of first autonomous session)
 
 | Item | Result | Where |
