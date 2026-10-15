@@ -112,8 +112,10 @@ def test_wedged_after_troubles_in_one_spot():
     nav.troubles = []
     nav.odo = SimpleNamespace(pose=(1.0, 1.0, 0.0))
     nav.last_us = 0.272
-    assert not any(nav.trouble() for _ in range(3))
-    assert nav.trouble()                                # 4th trouble, same spot, same sonar
+    assert not any(nav.trouble() for _ in range(5))     # blocks only: an obstacle ahead, not stuck
+    nav.troubles = []
+    assert not any(nav.trouble(physical=k == 0) for k in range(3))
+    assert nav.trouble()                                # 4th trouble, same spot, same sonar, one stall
     nav.troubles = []
     for k in range(6):
         nav.last_us = 0.27 + 0.05 * k                    # the sonar changes: still making progress

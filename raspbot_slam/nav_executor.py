@@ -41,6 +41,7 @@ STOP_FILE = "/tmp/rover_stop"  # touch it to stop a mission between hops
 WEDGED_EVENTS = 4             # this many troubles (stall, contact, block) in one spot = wedged
 WEDGED_RADIUS_M = 0.15
 WEDGED_SONAR_M = 0.03         # ... with the sonar range barely changing
+NEAR_GOAL_M = 0.20            # blocked within tol + this of the goal counts as arrived
 # battery proxy (no pack-voltage register): hop speed at NAV_SPEED falls with the pack voltage
 BATTERY_REF_MPS = 0.35        # calibrate.py fit of the 2026-10-12 runs, d = v (t - lag)
 BATTERY_LAG_S = 0.09
@@ -100,7 +101,7 @@ class Navigator:
         self.path = []                       # driven (x, y) for plots
         self.why = None                      # why the last go_to gave up
         self.last_us = float("nan")          # last sonar range (m)
-        self.troubles = []                   # (x, y, sonar) of recent stalls, contacts and blocks
+        self.troubles = []                   # (x, y, sonar, physical) of recent stalls, contacts and blocks
         self.events = {"contacts": 0, "blocked": 0, "turn_stalls": 0, "relaxed": 0}
 
     # ---- setup ---------------------------------------------------------------------
@@ -203,7 +204,7 @@ class Navigator:
         err = turn_to(self.rig.act, self.rig.hd, self.rig.hd.heading_deg + wrap180(room_deg - h))
         if abs(err) > TURN_STALL_DEG and retry:
             self.events["turn_stalls"] += 1
-            self.trouble()
+            self.trouble(physical=True)
             self.mark(f"turn stalled {err:+.0f} deg short: backing off and retrying")
             self.back_off()
             err = self.turn_to_heading(room_deg, retry=False)
@@ -251,20 +252,22 @@ class Navigator:
         drive_straight(self.rig.act, self.rig.hd, -config.NAV_SPEED, max(config.NAV_MIN_HOP_S, metres / SPEED_MPS))
         time.sleep(0.3)
 
-    def trouble(self):
-        """Note a stall, contact or block here; True when the robot is wedged:
-        several troubles in one spot with the sonar range barely changing
-        (2026-10-12: against the south wall, sonar 272 mm, every turn stalled)."""
+    def trouble(self, physical=False):
+        """Note a stall, contact (physical) or block here; True when the robot is
+        wedged: several troubles in one spot with the sonar range barely changing,
+        at least one of them physical (2026-10-12: against the south wall, sonar
+        272 mm, every turn stalled). Blocks alone are not: on 2026-10-14 four
+        blocks by a wastebasket just past the goal read as wedged."""
         x, y, _ = self.pose
         self.troubles = [t for t in self.troubles
-                         if math.hypot(t[0] - x, t[1] - y) < WEDGED_RADIUS_M] + [(x, y, self.last_us)]
+                         if math.hypot(t[0] - x, t[1] - y) < WEDGED_RADIUS_M] + [(x, y, self.last_us, physical)]
         recent = self.troubles[-WEDGED_EVENTS:]
         sonar = [t[2] for t in recent if t[2] == t[2]]
-        return (len(recent) >= WEDGED_EVENTS and len(sonar) == len(recent)
+        return (len(recent) >= WEDGED_EVENTS and len(sonar) == len(recent) and any(t[3] for t in recent)
                 and max(sonar) - min(sonar) < WEDGED_SONAR_M)
 
-    def wedged(self):
-        if self.trouble():
+    def wedged(self, physical=False):
+        if self.trouble(physical):
             self.mark("wedged: troubles in one spot with an unchanging sonar range; stopping")
             self.why = "wedged"
             return True
@@ -311,6 +314,12 @@ class Navigator:
                 # something the map didn't know is right ahead: mark it lethal (one
                 # weak sonar reading doesn't flip the cells, and the planner would
                 # choose the same path again), then replan
+                dist = math.hypot(goal[0] - x, goal[1] - y)     # x, y may have moved with a fix
+                if dist < tol + NEAR_GOAL_M:
+                    # the goal sits just short of the obstacle (2026-10-14: tag 4's
+                    # viewpoint 0.2 m before a wastebasket): close enough
+                    self.mark(f"blocked ahead ({free:.2f} m) {dist:.2f} m from the goal: stopping here")
+                    return True
                 self.mark(f"blocked ahead ({free:.2f} m): replanning")
                 self.map.add_contact(self.pose_rad(), ahead_m=free + SONAR_AHEAD_M)
                 self.events["blocked"] += 1
@@ -334,7 +343,7 @@ class Navigator:
                 self.mark(f"contact: hop moved {moved * 100:.0f} cm of {expected * 100:.0f}")
                 self.events["contacts"] += 1
                 self.map.add_contact(self.pose_rad())
-                if self.wedged():
+                if self.wedged(physical=True):
                     return False
                 self.back_off()
                 if contacts >= max_contacts:
