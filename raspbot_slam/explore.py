@@ -96,7 +96,7 @@ def main(argv=None):
     from .calibration import auto_camera_cal as acc
     from .floor_odometry import FloorModel
     from .m1_run import load_intrinsics
-    from .nav_executor import Navigator, check_stop, install_stop_handlers
+    from .nav_executor import Navigator, battery_gate, check_stop, install_stop_handlers
     from .recorder import RunRecorder
     from .tag_localizer import TagLocalizer, load_survey
     from .tag_tour import anchor_fix, fix_at_stop
@@ -105,6 +105,8 @@ def main(argv=None):
     p.add_argument("--minutes", type=float, default=10.0)
     p.add_argument("--prior", default=None, help="start from a saved map (offline/merge_runs.py output)")
     p.add_argument("--correct", action="store_true", help="apply tag fixes to the pose")
+    p.add_argument("--no-battery-check", action="store_true",
+                   help="skip the start hops that check motor speed (battery proxy)")
     args = p.parse_args(argv)
     install_stop_handlers()
 
@@ -127,6 +129,8 @@ def main(argv=None):
                 return 1
             rec.mark("fix " + json.dumps(dict(fix, label="start", ok=True)))
             nav.start(fix)
+            if not args.no_battery_check and not battery_gate(nav):
+                return 1
             print(f"start: ({fix['x']:.2f}, {fix['y']:.2f}) heading {fix['heading']:+.0f}", flush=True)
             t_end = time.monotonic() + args.minutes * 60
             look_around(nav)

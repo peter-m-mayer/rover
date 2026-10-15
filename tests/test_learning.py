@@ -74,6 +74,7 @@ def test_prior_round_trip_keeps_solid_and_contacts(office, tmp_path):
 
 def test_score_counts_events_and_stops(tmp_path, office):
     rows = [(0.0, "start"),
+            (0.5, "battery " + json.dumps({"v_mps": 0.3, "ratio": 0.86, "verdict": "ok"})),
             (1.0, "blocked ahead (0.20 m): replanning"),
             (2.0, "contact: hop moved 1 cm of 6"),
             (3.0, "turn stalled -40 deg short: backing off and retrying"),
@@ -95,6 +96,7 @@ def test_score_counts_events_and_stops(tmp_path, office):
     assert (s["goals"], s["reached"]) == (2, 1)
     assert (s["contacts"], s["blocked"], s["turn_stalls"], s["gave_up"]) == (1, 1, 1, 1)
     assert s["why"] == ["blocked"]
+    assert (s["battery_mps"], s["battery_ratio"]) == (0.3, 0.86)
     assert s["distance_m"] == pytest.approx(7.0)
     assert s["seconds"] == pytest.approx(9.0)
     assert 0 < s["coverage"] < 0.2
@@ -139,3 +141,19 @@ def test_explore_picks_reachable_goal_toward_unseen_floor(office):
     # everything seen: nothing left
     m.seen[~m.wall] = True
     assert pick_goal(m, (2.0, 1.0)) is None
+
+
+def test_speed_check_verdicts():
+    from raspbot_slam import nav_executor as ne
+    nav = ne.Navigator.__new__(ne.Navigator)
+    marks = []
+    nav.rec = type("R", (), {"mark": lambda self, m: marks.append(m)})()
+    nav.sense = lambda sweep=True: 1.0
+    for per_hop, verdict in ((0.14, "ok"), (0.115, "weak"), (0.08, "low")):
+        nav.hop = lambda seconds, reverse=False, d=per_hop: d
+        b = nav.speed_check(seconds=0.5)
+        assert b["verdict"] == verdict, (per_hop, b)
+    assert marks[-1].startswith("battery ")
+    nav.sense = lambda sweep=True: 0.3                    # no room ahead: don't drive
+    nav.hop = None
+    assert nav.speed_check()["verdict"] in ("skipped", "low")

@@ -131,6 +131,9 @@ python3 -m raspbot_slam.tag_tour           # self-test v2: plan to a viewpoint o
                                             #   a merged map; saves room_map.npz/.png, nav.json, score.json
 python3 -m raspbot_slam.explore --minutes 10 --correct --prior maps/office_prior.npz   # map the room:
                                             #   drive to where the most unseen floor is, look all round, repeat
+# Battery check (tour + explore, after the start fix): 2 forward/back hop pairs, speed vs a charged pack
+#   (0.35 m/s) + the Pi under-voltage flag. < 85% warns, < 70% refuses to start; needs 0.45 m free ahead.
+#   --no-battery-check skips it. The result is the "battery" mark in events.csv and battery_* in scores.csv.
 # Stop a tour/explore cleanly (motors off, map saved):  touch /tmp/rover_stop   (or pkill -TERM -f "[t]ag_tour")
 python3 -m raspbot_slam.recorder --seconds 60 --label static   # log a run (nothing moves):
                                            # datasets/slam_runs/<stamp>_<label>/ frames+IMU+sensors+power

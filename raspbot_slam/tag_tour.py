@@ -28,7 +28,7 @@ from .calibration import auto_camera_cal as acc
 from .floor_odometry import FloorModel
 from .heading import turn_to, wrap180
 from .m1_run import load_intrinsics
-from .nav_executor import Navigator, install_stop_handlers
+from .nav_executor import Navigator, battery_gate, install_stop_handlers
 from .planner import tag_viewpoint
 from .recorder import RunRecorder
 from .tag_localizer import IN, TagLocalizer, load_survey
@@ -82,6 +82,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Dead-reckoning self-test against the surveyed tags.")
     p.add_argument("--route", default="3,2,1,0,4,3")
     p.add_argument("--correct", action="store_true", help="apply tag fixes to the pose")
+    p.add_argument("--no-battery-check", action="store_true",
+                   help="skip the start hops that check motor speed (battery proxy)")
     p.add_argument("--prior", default=None, help="start from a saved map (offline/merge_runs.py output)")
     args = p.parse_args(argv)
     install_stop_handlers()
@@ -105,6 +107,8 @@ def main(argv=None):
             print(f"start: x {fix['x']:.2f} y {fix['y']:.2f} heading {fix['heading']:+.0f} "
                   f"(tags {fix['tags']})", flush=True)
             nav.start(fix)
+            if not args.no_battery_check and not battery_gate(nav):
+                return 1
             t0 = time.monotonic()
             for leg, tag in enumerate(int(v) for v in args.route.split(",")):
                 reached, vp = False, None

@@ -41,6 +41,12 @@ STOP_FILE = "/tmp/rover_stop"  # touch it to stop a mission between hops
 WEDGED_EVENTS = 4             # this many troubles (stall, contact, block) in one spot = wedged
 WEDGED_RADIUS_M = 0.15
 WEDGED_SONAR_M = 0.03         # ... with the sonar range barely changing
+# battery proxy (no pack-voltage register): hop speed at NAV_SPEED falls with the pack voltage
+BATTERY_REF_MPS = 0.35        # calibrate.py fit of the 2026-10-12 runs, d = v (t - lag)
+BATTERY_LAG_S = 0.09
+BATTERY_WARN = 0.85           # measured / reference below this: warn
+BATTERY_LOW = 0.70            # ... below this: don't start the mission
+BATTERY_ROOM_M = 0.45         # free floor ahead needed for the forward / back hops
 
 
 def install_stop_handlers():
@@ -59,6 +65,22 @@ def install_stop_handlers():
 def check_stop():
     if os.path.exists(STOP_FILE):
         raise KeyboardInterrupt(f"{STOP_FILE} exists")
+
+
+def battery_gate(nav):
+    """Run nav.speed_check, print it; False when the mission shouldn't start."""
+    b = nav.speed_check()
+    if b["v_mps"] is None:
+        print(f"battery check skipped ({b.get('why')}); Pi power {b['power']}", flush=True)
+    else:
+        print(f"battery check: {b['v_mps']:.2f} m/s = {b['ratio']:.0%} of a charged pack "
+              f"(hops {b['hops_cm']} cm); Pi power {b['power']} -> {b['verdict']}", flush=True)
+    if b["verdict"] == "weak":
+        print("battery looks weak: expect short hops, false contacts and camera dropouts", flush=True)
+    if b["verdict"] == "low":
+        print("battery low: not starting (charge it, or pass --no-battery-check)", flush=True)
+        return False
+    return True
 
 
 class Navigator:
@@ -187,14 +209,43 @@ class Navigator:
             err = self.turn_to_heading(room_deg, retry=False)
         return err
 
-    def hop(self, seconds):
+    def hop(self, seconds, reverse=False):
         x0, y0, _ = self.pose
-        drive_straight(self.rig.act, self.rig.hd, config.NAV_SPEED, seconds)
+        drive_straight(self.rig.act, self.rig.hd, -config.NAV_SPEED if reverse else config.NAV_SPEED, seconds)
         time.sleep(0.35)                          # let floor odometry catch up
         x1, y1, _ = self.pose
         moved = math.hypot(x1 - x0, y1 - y0)
         self.path.append((x1, y1))
         return moved
+
+    def speed_check(self, pairs=2, seconds=None):
+        """Battery check at mission start: forward / back hop pairs over the same
+        floor, speed from floor odometry, against BATTERY_REF_MPS; plus the Pi's
+        under-voltage flag. Returns a dict; verdict is ok, weak, low or skipped."""
+        seconds = seconds or config.NAV_HOP_S
+        try:
+            from catchaser.rc import read_throttled
+            power = read_throttled()
+        except Exception:
+            power = "?"
+        out = {"power": power, "v_mps": None, "ratio": None, "verdict": "skipped"}
+        free = self.sense(sweep=False)
+        if free < BATTERY_ROOM_M:
+            out["why"] = f"only {free:.2f} m free ahead"
+        else:
+            moved = []
+            for _ in range(pairs):
+                moved.append(self.hop(seconds))
+                moved.append(self.hop(seconds, reverse=True))
+            v = sum(moved) / (len(moved) * (seconds - BATTERY_LAG_S))
+            out.update(v_mps=round(v, 3), ratio=round(v / BATTERY_REF_MPS, 2),
+                       hops_cm=[round(m * 100, 1) for m in moved])
+            out["verdict"] = ("low" if out["ratio"] < BATTERY_LOW else
+                              "weak" if out["ratio"] < BATTERY_WARN else "ok")
+        if power == "now":
+            out["verdict"] = "low"
+        self.rec.mark("battery " + json.dumps(out))
+        return out
 
     def back_off(self, metres=0.15):
         drive_straight(self.rig.act, self.rig.hd, -config.NAV_SPEED, max(config.NAV_MIN_HOP_S, metres / SPEED_MPS))

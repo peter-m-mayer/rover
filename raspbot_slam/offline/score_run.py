@@ -34,7 +34,7 @@ SCORES_CSV = os.path.join("datasets", "slam_runs", "scores.csv")
 FIELDS = ["run", "kind", "goals", "reached", "stop_err_med_m", "stop_err_max_m", "stop_err_med_deg",
           "contacts", "blocked", "turn_stalls", "relaxed", "gave_up", "wedged", "heading_resets",
           "position_resets", "distance_m", "coverage", "wall_offset_m", "replay_err_med_m", "replay_fixes",
-          "seconds"]
+          "seconds", "battery_mps", "battery_ratio"]
 
 # event label -> counter (the executor's and localizer's own wording)
 PATTERNS = [
@@ -67,6 +67,12 @@ def event_counts(events):
                 out[k] += 1
         if GAVE_UP.search(label):
             out["gave_up"] += 1
+        if label.startswith("battery "):                 # nav_executor.speed_check at the start
+            try:
+                b = json.loads(label[len("battery "):])
+                out["battery_mps"], out["battery_ratio"] = b.get("v_mps"), b.get("ratio")
+            except ValueError:
+                pass
         for prefix in ("tourstop ", "exploregoal "):     # tag_tour stops, explore goals
             if label.startswith(prefix):
                 try:
@@ -144,7 +150,7 @@ def summary_line(s):
             f"(max {f(s['stop_err_max_m'], '.2f')}), contacts {s['contacts']}, blocked {s['blocked']}, "
             f"turn stalls {s['turn_stalls']}, gave up {s['gave_up']} {s.get('why') or ''}, "
             f"distance {f(s.get('distance_m'), '.1f')} m, coverage {f(s.get('coverage'), '.0%')}, "
-            f"wall offset {f(s.get('wall_offset_m'), '.2f')} m")
+            f"wall offset {f(s.get('wall_offset_m'), '.2f')} m, battery {f(s.get('battery_ratio'), '.0%')}")
 
 
 def append_csv(s, path=SCORES_CSV):
