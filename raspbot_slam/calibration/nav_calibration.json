@@ -1,0 +1,12 @@
+{
+ "NAV_SPEED_MPS": 0.3809,
+ "NAV_START_LAG_S": 0.0958,
+ "LOC_SIG_FIX_XY_M": 0.03,
+ "LOC_ODO_XY_PER_M": 0.0791,
+ "_runs": [
+  "20261012_075443_tagtour",
+  "20261012_090828_tagtour",
+  "20261012_211537_tagtour",
+  "20261014_174504_explore"
+ ]
+}
