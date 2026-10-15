@@ -8,6 +8,7 @@ closes the loop on heading.
 
     hd = GyroHeading(imu).start()      # background integration, ~200 Hz
     hd.heading_deg                     # CCW-positive since start (or reset)
+    hd.still_fn = act.still_s          # optional: re-learn the bias while parked
     drive_straight(act, hd, speed=50, seconds=0.5)   # holds the current heading
 """
 
@@ -17,13 +18,21 @@ import time
 
 import numpy as np
 
+# The bias drifts as the IMU warms up: 2026-10-14 it went from +0.82 to +0.90
+# deg/s over a 9-minute tour, 29 deg of heading error by the end. With still_fn
+# set, it is re-learned whenever the motors have been off a while.
+STILL_AFTER_S = 0.8           # motors off this long: the body has stopped coasting
+BIAS_TAU_S = 10.0             # time constant of the running bias estimate
+BIAS_JUMP = math.radians(3.0)  # a reading this far from the bias is motion (a push), not bias
+
 
 class GyroHeading:
-    def __init__(self, imu, rate_hz=200.0, axis=2):
+    def __init__(self, imu, rate_hz=200.0, axis=2, still_fn=None):
         self.imu = imu
         self.period = 1.0 / rate_hz
         self.axis = axis
         self.bias = 0.0
+        self.still_fn = still_fn     # () -> seconds the motors have been off
         self._heading = 0.0
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -54,10 +63,18 @@ class GyroHeading:
         t_prev = time.monotonic()
         while not self._stop.is_set():
             try:
-                rate = self.imu.gyro[self.axis] - self.bias
+                raw = self.imu.gyro[self.axis]
             except OSError:
-                rate = None
+                raw = None
             now = time.monotonic()
+            if raw is not None and self.still_fn is not None and abs(raw - self.bias) < BIAS_JUMP:
+                try:
+                    still = self.still_fn() > STILL_AFTER_S
+                except Exception:
+                    still = False
+                if still:
+                    self.bias += (raw - self.bias) * min(1.0, (now - t_prev) / BIAS_TAU_S)
+            rate = None if raw is None else raw - self.bias
             if rate is not None:
                 with self._lock:
                     self._heading += rate * (now - t_prev)

@@ -159,3 +159,38 @@ def test_speed_check_verdicts():
     nav.sense = lambda sweep=True: 0.3                    # no room ahead: don't drive
     nav.hop = None
     assert nav.speed_check()["verdict"] in ("skipped", "low")
+
+
+def test_localizer_sigma_independent_of_update_rate():
+    from raspbot_slam.localizer import ODO_XY_PER_M, Localizer
+    sig = []
+    for steps in (1, 50):
+        odo = SimpleNamespace(travelled_m=0.0, pose=(0.0, 0.0, 0.0))
+        loc = Localizer(odo)
+        for k in range(steps):
+            odo.travelled_m = 5.0 * (k + 1) / steps
+            loc.predict()
+        sig.append(loc.sigma_xy())
+    assert sig[0] == pytest.approx(sig[1], rel=1e-6)
+    assert sig[0] == pytest.approx(0.02 + 5.0 * ODO_XY_PER_M, rel=1e-3)
+
+
+def test_gyro_bias_relearned_while_still():
+    import math
+    import time
+    from raspbot_slam.heading import GyroHeading
+    imu = SimpleNamespace(gyro=(0.0, 0.0, math.radians(0.9)))   # true rate 0, bias drifted to 0.9 deg/s
+    still = {"s": 5.0}
+    hd = GyroHeading(imu, rate_hz=500, still_fn=lambda: still["s"])
+    hd.bias = math.radians(0.8)
+    hd.start(calibrate=False)
+    time.sleep(1.0)
+    hd.stop()
+    assert math.degrees(hd.bias) > 0.805                       # moving toward 0.9 (tau 10 s)
+    still["s"] = 0.0                                           # driving: no update
+    hd2 = GyroHeading(imu, rate_hz=500, still_fn=lambda: still["s"])
+    hd2.bias = math.radians(0.8)
+    hd2.start(calibrate=False)
+    time.sleep(0.3)
+    hd2.stop()
+    assert hd2.bias == math.radians(0.8)

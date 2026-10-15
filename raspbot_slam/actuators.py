@@ -32,6 +32,7 @@ class Actuators:
         self._pan_angle = config.SERVO_PAN_CENTER
         self._tilt_angle = config.SERVO_TILT_REST
         self.i2c_retries = 0        # writes that needed a retry (diagnostics)
+        self._still_since = time.monotonic()   # motors all zero since (None while driving)
 
     def _write(self, reg, data) -> bool:
         """Write a command to the MCU, retrying on I2C errors.
@@ -112,6 +113,10 @@ class Actuators:
         def clamp(v):
             return max(-config.MOTOR_SPEED_MAX, min(config.MOTOR_SPEED_MAX, int(v)))
 
+        if any(int(v) != 0 for v in (l1, l2, r1, r2)):
+            self._still_since = None
+        elif self._still_since is None:
+            self._still_since = time.monotonic()
         if self._bot is not None:
             for motor_id, v in ((config.MOTOR_L1_ID, l1), (config.MOTOR_L2_ID, l2),
                                 (config.MOTOR_R1_ID, r1), (config.MOTOR_R2_ID, r2)):
@@ -182,6 +187,11 @@ class Actuators:
         r1 = forward - strafe - turn
         r2 = forward + strafe - turn
         self._set_motors(l1, l2, r1, r2)
+
+    def still_s(self):
+        """Seconds since the motors were last all stopped (0 while driving)."""
+        t = self._still_since
+        return 0.0 if t is None else time.monotonic() - t
 
     def stop(self):
         """Stop all motors immediately (sent twice: a lost stop is the dangerous one)."""

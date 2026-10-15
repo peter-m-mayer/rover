@@ -144,7 +144,7 @@ class Rig:
         self.servo(self.pan, self.tilt, settle=0.6)
         self.gz_bias = self._gyro_bias()
         from raspbot_slam.heading import GyroHeading
-        self.hd = GyroHeading(self.imu).start(calibrate=False)
+        self.hd = GyroHeading(self.imu, still_fn=self.act.still_s).start(calibrate=False)
         self.hd.bias = self.gz_bias
         self.target = target or CheckerTarget()
         self.objp = self.target.objp

@@ -52,8 +52,13 @@ class Localizer:
         dd = max(0.0, d - self._last[0])
         dh = abs(math.radians(wrap180(h - self._last[1])))
         self._last = (d, h)
-        q = (ODO_XY_PER_M * dd) ** 2 + 1e-6
-        self.P = self.P + np.diag([q, q, (ODO_TH_PER_RAD * dh) ** 2 + 1e-7])
+        # sigma grows linearly (drift from a heading or scale error is systematic, not a
+        # random walk), so it doesn't depend on how often predict() is called: adding
+        # (k dd)^2 per call made 10 m of short hops worth a third of one 10 m step
+        if dd > 0:
+            sx = math.sqrt(max(self.P[0, 0], self.P[1, 1])) + ODO_XY_PER_M * dd
+            self.P[0, 0] = self.P[1, 1] = sx ** 2
+        self.P[2, 2] = (math.sqrt(self.P[2, 2]) + ODO_TH_PER_RAD * dh) ** 2
 
     def innovation(self, fix):
         x, y, h = self.pose
